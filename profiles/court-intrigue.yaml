@@ -1,0 +1,36 @@
+# A second profile, included to make the point that the engine is series-agnostic.
+#
+# Same checkers, same graph, same arithmetic. What changes is that information
+# travels by rider and raven over a table of road-days instead of by radio over
+# light years, and that dead is permanent here — so the object-and-body checker
+# demands no restore, because there is none to demand.
+name: court-intrigue
+
+narration:
+  mode: third_close_rotating
+  pov_from: chapter_header
+
+time:
+  calendar: year_label             # "297 AC"
+  epoch_label: AC
+  days_per_year: 365.25
+
+space:
+  model: travel_table              # days between places, not distances
+  distances: data/court-roads.csv
+
+information:
+  # In a travel-table world the road table sets the pace and a channel is a
+  # multiple of it. A raven beats a rider; a rumour lags both and arrives
+  # distorted. Reading these as speeds would make every carrier instantaneous.
+  channels:
+    - {name: rider,  speed: c, table_factor: 1.0}
+    - {name: raven,  speed: c, table_factor: 0.35}
+    - {name: rumour, speed: c, table_factor: 2.5, distortion: 0.4}
+
+entities:
+  clone_lineage: false
+  revivable: false
+
+style:
+  units: chapter

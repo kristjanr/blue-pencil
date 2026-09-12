@@ -1,0 +1,17 @@
+# The Continuity Editor on its own: no generation, every checker at its
+# strictest. This is the Phase 2 product — point it at a human-written chapter
+# and it marks it up.
+name: editor-only
+
+gates: {plan: manual, chapter: manual, act: manual}
+
+checks:
+  epistemic:  hard
+  geography:  hard
+  objects:    hard
+  card:       soft                 # a human's chapter has no card to honour
+  repetition: {severity: hard, budget: corpus_baseline}
+  voice:      soft
+  consequence: soft
+  discriminator: off               # somebody else wrote it; the question is moot
+  panel:      soft

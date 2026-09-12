@@ -1,0 +1,12 @@
+# canonical: [aliases]
+# A replicant series is the hard case for alias resolution: the copies share a
+# name with the original and with each other, and retrieval that misses a scene
+# because the text used a nickname is a silent failure, not a loud one.
+Bob-1: [Bob, "Bob 1", the original, Robert Johansson]
+Riker: [Bob-2, "Bob 2", Will, William]
+Homer: [Bob-3, "Bob 3"]
+Bill:  [Bob-4, "Bob 4"]
+Milo:  [Bob-5, "Bob 5"]
+Mario: [Bob-6, "Bob 6"]
+Linus: [Bob-7, "Bob 7"]
+Howard: []

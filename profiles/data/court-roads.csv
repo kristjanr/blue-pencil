@@ -1,0 +1,10 @@
+from,to,days
+# Days of travel between places. In a travel-table world the terrain, not the
+# distance, sets the time — which is why this is a table and not a coordinate.
+Kings Landing,Winterfell,30
+Kings Landing,Casterly Rock,14
+Kings Landing,Highgarden,12
+Kings Landing,The Wall,45
+Winterfell,The Wall,15
+Winterfell,Casterly Rock,35
+Casterly Rock,Highgarden,10

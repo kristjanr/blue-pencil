@@ -1,0 +1,21 @@
+{
+  "card_id": "LW4.ch01",
+  "book": "LW4",
+  "chapter": 1,
+  "pov": "Ana",
+  "date_inworld": "2185-01-01",
+  "location": "Sol",
+  "cast": ["Ana"],
+  "goal": "Ana draws the boundary of her own ignorance and signs the chart",
+  "turn": "She files the chart as honestly dark rather than guessing",
+  "reveals": [
+    {"what": "Ana discovers the Sol archive has been quietly editing her charts", "to_whom": "Ana", "channel": "on the page"},
+    {"what": "A courier drone arrives carrying a sealed instruction from the Cartographers' Board", "to_whom": "Ana", "channel": "courier"}
+  ],
+  "threads_advanced": ["T-001"],
+  "seeds_planted": [],
+  "seeds_paid": ["P-001"],
+  "consequences_expected": ["The Sol archive can no longer be trusted as a reference"],
+  "word_budget": 3000,
+  "scenes": [{"beats": "Ana works the numbers alone and files an honest chart", "word_budget": 3000}]
+}

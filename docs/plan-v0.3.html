@@ -1,0 +1,865 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style></head><body>
+<title>Blue Pencil</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,700;1,7..72,400;1,7..72,500&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap">
+<style>
+  :root {
+    --paper: #F4F5F2;
+    --paper-2: #EBEDE8;
+    --ink: #1B1D22;
+    --ink-2: #4E535B;
+    --muted: #7A7F88;
+    --rule: #D3D6D0;
+    --rule-2: #BFC3BC;
+    --blue: #2B57B8;
+    --blue-ink: #1F4494;
+    --blue-tint: #E3EAF8;
+    --red: #B8382B;
+    --red-tint: #F6E3E0;
+    --code-bg: #ECEEEA;
+    --serif: "Literata", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --mono: "Courier Prime", "Courier New", Courier, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #16181C;
+      --paper-2: #1D2025;
+      --ink: #E6E4DD;
+      --ink-2: #B4B3AC;
+      --muted: #868B94;
+      --rule: #2C3037;
+      --rule-2: #3A3F47;
+      --blue: #86ACF2;
+      --blue-ink: #A8C4F7;
+      --blue-tint: #1C2740;
+      --red: #E38073;
+      --red-tint: #3A2320;
+      --code-bg: #1D2025;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #16181C;
+    --paper-2: #1D2025;
+    --ink: #E6E4DD;
+    --ink-2: #B4B3AC;
+    --muted: #868B94;
+    --rule: #2C3037;
+    --rule-2: #3A3F47;
+    --blue: #86ACF2;
+    --blue-ink: #A8C4F7;
+    --blue-tint: #1C2740;
+    --red: #E38073;
+    --red-tint: #3A2320;
+    --code-bg: #1D2025;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.6;
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--blue-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+  .page {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 56px 28px 96px;
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    column-gap: 40px;
+    align-items: end;
+    padding-bottom: 28px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .masthead .stamp {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--blue);
+  }
+  .masthead .stamp span { display: block; }
+  .masthead h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(44px, 7vw, 76px);
+    line-height: 0.98;
+    letter-spacing: -0.02em;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .masthead h1 .u {
+    text-decoration: underline;
+    text-decoration-color: var(--blue);
+    text-decoration-thickness: 3px;
+    text-underline-offset: 8px;
+  }
+  .masthead .dek {
+    font-size: 20px;
+    line-height: 1.45;
+    max-width: 62ch;
+    color: var(--ink-2);
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  /* ---------- manuscript grid ---------- */
+  .ms {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    column-gap: 40px;
+    row-gap: 0;
+  }
+  .ms > .margin {
+    padding-top: 6px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--blue);
+  }
+  .ms > .margin .no {
+    display: block;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .ms > .margin .note {
+    display: block;
+    margin-top: 6px;
+    color: var(--blue-ink);
+    font-style: italic;
+  }
+  .ms > .body { max-width: 66ch; min-width: 0; }
+  .ms > .wide { grid-column: 1 / -1; min-width: 0; }
+  .ms > .margin, .ms > .body, .ms > .wide { padding-top: 56px; }
+  .ms > .margin + .body { }
+  .ms > .body h2, .ms > .wide h2 {
+    font-weight: 500;
+    font-size: 30px;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    margin: 0 0 18px;
+    text-wrap: balance;
+  }
+  .ms > .body h3, .ms > .wide h3 {
+    font-weight: 700;
+    font-size: 17px;
+    margin: 30px 0 8px;
+  }
+  p { margin: 0 0 16px; text-wrap: pretty; }
+  p.lede { font-size: 19px; color: var(--ink-2); }
+  ul, ol { padding-left: 22px; margin: 0 0 16px; }
+  li { margin-bottom: 6px; }
+  li::marker { color: var(--muted); }
+  strong { font-weight: 700; }
+  em { font-style: italic; }
+  .k { font-family: var(--mono); font-size: 0.9em; color: var(--blue-ink); }
+
+  /* ---------- editor's marginalia (callouts) ---------- */
+  .marg {
+    border-left: 3px solid var(--blue);
+    background: var(--blue-tint);
+    padding: 14px 18px;
+    margin: 20px 0 24px;
+    font-size: 16px;
+  }
+  .marg .lbl {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--blue);
+    margin-bottom: 6px;
+  }
+  .marg p:last-child { margin-bottom: 0; }
+  .marg.red { border-left-color: var(--red); background: var(--red-tint); }
+  .marg.red .lbl { color: var(--red); }
+
+  /* ---------- pipeline diagram ---------- */
+  .pipe {
+    margin-top: 10px;
+    border: 1px solid var(--rule);
+    background: var(--paper-2);
+    padding: 26px 24px 22px;
+    overflow-x: auto;
+  }
+  .pipe .row {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(150px, 1fr));
+    gap: 0;
+    align-items: stretch;
+    min-width: 960px;
+  }
+  .pipe .stage {
+    position: relative;
+    padding: 14px 16px 14px 14px;
+    border: 1px solid var(--rule-2);
+    background: var(--paper);
+    margin-right: 26px;
+  }
+  .pipe .stage:last-child { margin-right: 0; }
+  .pipe .stage::after {
+    content: "";
+    position: absolute;
+    right: -26px; top: 50%;
+    width: 26px; height: 1px;
+    background: var(--ink-2);
+  }
+  .pipe .stage::before {
+    content: "";
+    position: absolute;
+    right: -26px; top: calc(50% - 4px);
+    width: 0; height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 6px solid var(--ink-2);
+    z-index: 1;
+  }
+  .pipe .stage:last-child::after, .pipe .stage:last-child::before { display: none; }
+  .pipe .stage .n {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--blue);
+    display: block;
+    margin-bottom: 4px;
+  }
+  .pipe .stage .t { font-weight: 700; font-size: 15.5px; line-height: 1.25; display: block; margin-bottom: 6px; }
+  .pipe .stage .d { font-size: 13.5px; line-height: 1.4; color: var(--ink-2); display: block; }
+  .pipe .stage.gate { border-color: var(--blue); border-width: 2px; }
+  .pipe .loop {
+    min-width: 960px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--rule-2);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-2);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .pipe .loop b { color: var(--blue); font-weight: 700; }
+
+  /* ---------- tables ---------- */
+  .tbl { overflow-x: auto; margin: 18px 0 8px; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 10px 12px 10px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  th {
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 11.5px;
+    color: var(--blue);
+    border-bottom: 1px solid var(--ink);
+  }
+  td.num { text-align: right; padding-right: 18px; white-space: nowrap; }
+  th.num { text-align: right; padding-right: 18px; }
+  tr:last-child td { border-bottom: 1px solid var(--rule-2); }
+  .tbl .serif { font-family: var(--serif); font-size: 15px; }
+
+  /* ---------- code ---------- */
+  pre {
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.5;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    padding: 16px 18px;
+    margin: 14px 0 22px;
+    overflow-x: auto;
+    color: var(--ink);
+  }
+  pre .c { color: var(--muted); font-style: italic; }
+  pre .b { color: var(--blue-ink); }
+  code { font-family: var(--mono); font-size: 0.92em; }
+
+  /* ---------- ledgers (definition rows) ---------- */
+  .ledger { display: grid; grid-template-columns: 1fr; gap: 0; margin: 12px 0 20px; border-top: 1px solid var(--rule-2); }
+  .ledger .row {
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    gap: 18px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .ledger .row .h { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--blue-ink); padding-top: 2px; }
+  .ledger .row .v { font-size: 15.5px; line-height: 1.5; }
+  .ledger .row .v p:last-child { margin-bottom: 0; }
+
+  /* ---------- phases ---------- */
+  .phases { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 16px; }
+  .phase {
+    border-top: 2px solid var(--ink);
+    padding: 12px 0 4px;
+  }
+  .phase .n { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--blue); display: block; }
+  .phase .t { font-weight: 700; font-size: 16px; display: block; margin: 4px 0 8px; }
+  .phase ul { padding-left: 18px; margin: 0 0 8px; font-size: 14.5px; }
+  .phase .exit { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); }
+  .phase .exit b { color: var(--blue-ink); }
+
+  /* ---------- checks list ---------- */
+  .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px 24px; margin-top: 14px; }
+  .check { padding: 12px 14px; border: 1px solid var(--rule-2); background: var(--paper-2); }
+  .check .t { font-weight: 700; display: block; margin-bottom: 4px; }
+  .check .t .sev { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; margin-left: 8px; color: var(--red); }
+  .check .t .sev.soft { color: var(--blue); }
+  .check .d { font-size: 14.5px; line-height: 1.45; color: var(--ink-2); }
+
+  .fin { margin-top: 64px; padding-top: 18px; border-top: 2px solid var(--ink); font-family: var(--mono); font-size: 12.5px; color: var(--muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+
+  @media (max-width: 860px) {
+    body { font-size: 16px; }
+    .page { padding: 36px 18px 72px; }
+    .masthead, .ms { grid-template-columns: 1fr; column-gap: 0; }
+    .masthead .stamp { margin-bottom: 18px; }
+    .ms > .margin { padding-top: 44px; padding-bottom: 0; }
+    .ms > .margin + .body, .ms > .margin + .wide { padding-top: 10px; }
+    .ledger .row { grid-template-columns: 1fr; gap: 4px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: text-decoration-color .15s ease; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="stamp">
+      <span>Engineering plan · v0.3</span>
+      <span>12 September 2026</span>
+      <span>Status: series-agnostic draft</span>
+    </div>
+    <div>
+      <h1>Blue <span class="u">Pencil</span></h1>
+      <p class="dek">An engine that takes an unfinished long series and produces a continuation the author's own readers would argue about — built as an editorial pipeline, not a prompt.</p>
+    </div>
+  </header>
+
+  <div class="ms">
+
+    <!-- ================= THESIS ================= -->
+    <div class="margin">
+      <span class="no">Thesis</span>
+      <span class="note">Why this isn't "ask Claude to write Book 6"</span>
+    </div>
+    <div class="body">
+      <h2>The context window is working memory. The story is the database.</h2>
+      <p class="lede">Every prior attempt failed the same way: plot continuity held up surprisingly well, sentence-level prose gave the game away. So the engine is designed around the failure, not the fantasy.</p>
+      <p>The arithmetic settles the architecture before any taste does. A five-book epic can run to 2.4 million tokens; a lighter five-book series like Bobiverse is around 700 thousand. The big one doesn't fit in a 1M context at all, and even the small one shouldn't be dumped in: "having read everything" is not the same as "knowing what this character currently believes, and when they could have learned it." Human readers don't carry the text either; they carry a compressed model of the world and pull specific scenes on demand. Blue Pencil does the same thing systematically.</p>
+      <p>The engine knows nothing about any particular series. Everything series-specific — how time is counted, how far apart places are, how information travels, how narration is structured, who the POV characters are — lives in a <em>series profile</em> the engine reads. The examples below use Bobiverse, because that's the corpus in hand; swap the profile and the same machinery runs on anything with enough books behind it.</p>
+      <p>Four commitments follow, and every later section derives from them:</p>
+      <ol>
+        <li><strong>Extract, don't remember.</strong> The books are turned into a cited, queryable story bible once. Every generation step retrieves a small, exact context pack from it.</li>
+        <li><strong>Separate what happens from how it's written from whether it's consistent.</strong> Three different jobs, three different agents, three different failure modes — never one prompt.</li>
+        <li><strong>Backtest before you generate.</strong> Hide the last published book, continue from the one before, score against reality. The engine earns the right to write Book 6 by proving it could have written Book 5.</li>
+        <li><strong>The human is editor-in-chief.</strong> The engine produces candidates and marginalia. Taste, boredom, and "no" stay human. Invention is a tournament the human judges, not a property of the prose model.</li>
+      </ol>
+      <div class="marg">
+        <span class="lbl">Editor's note</span>
+        <p>The name is the design brief. A blue pencil is what an editor marks a manuscript with. Most of this engine's value is in the marking, not the typing — the continuity, voice, and repetition checkers that no previous AI-fanfic project bothered to build.</p>
+      </div>
+      <div class="marg">
+        <span class="lbl">Revision history</span>
+        <p><strong>v0.3</strong> — Made series-agnostic. Series-specific knowledge moved into a profile; Bobiverse replaces ASOIAF as the worked example. "How much the human judges" stopped being a design decision and became run policy, alongside candidates per scene, model per stage, context budgets and checker severities. Cost restated as unit rates.</p>
+        <p><strong>v0.2</strong> — Backtest gained a contamination control and three tiers. The fact ledger became an <em>event and belief graph</em> with information paths and consequences; citations treated as necessary but not sufficient; discriminator demoted from target to floor; the Continuity Editor moved to the front of the roadmap. Kept against advice: retrieved canon exemplars, now matched on situation and technique.</p>
+      </div>
+    </div>
+
+    <!-- ================= PRIOR ART ================= -->
+    <div class="margin">
+      <span class="no">Prior art</span>
+      <span class="note">What each attempt actually taught</span>
+    </div>
+    <div class="wide">
+      <h2>Nine years of people trying this — read as a bug tracker</h2>
+      <div class="tbl">
+        <table>
+          <tr><th>Attempt</th><th>Method</th><th>What worked</th><th>What broke</th><th>Design consequence</th></tr>
+          <tr>
+            <td class="serif">Thoutt, 2017<br><span class="k">RNN on ~5,000 pages</span></td>
+            <td>Next-word prediction trained on canon</td>
+            <td>Surface Martinisms emerged unprompted: "tell me true", the odd "mine", character vocabularies</td>
+            <td>Grammar collapsed; no plot at all</td>
+            <td>Style fingerprints are cheap to learn. Don't spend the budget there.</td>
+          </tr>
+          <tr>
+            <td class="serif">Swayne, 2023<br><span class="k">ChatGPT, 683k words</span></td>
+            <td>Outline → denser outline → chapter, automated</td>
+            <td>Long-range continuity: a minor character returns 100k words later</td>
+            <td>Interchangeable voices, generic drama, exposition dumps</td>
+            <td>Hierarchical planning works. Voice needs its own subsystem.</td>
+          </tr>
+          <tr>
+            <td class="serif">Slade, ongoing<br><span class="k">AI-assisted, Royal Road</span></td>
+            <td>Human direction, AI prose, serial release</td>
+            <td>Atmosphere and tension readers praise</td>
+            <td>"Cold, wind, darkness and blood" on repeat; pacing drift</td>
+            <td>Repetition is the signature AI failure. It needs a dedicated auditor with a memory across chapters.</td>
+          </tr>
+          <tr>
+            <td class="serif">Human fan continuations<br><span class="k">~228k words, AO3</span></td>
+            <td>People</td>
+            <td>Invention, stakes, surprise</td>
+            <td>Continuity slips, uneven prose, years of effort</td>
+            <td>The strongest product may be human plot + machine editing. Build the editor so it works on any manuscript, not just our own.</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- ================= ARCHITECTURE ================= -->
+    <div class="margin">
+      <span class="no">Architecture</span>
+      <span class="note">Six stages, one loop, two human gates</span>
+    </div>
+    <div class="wide">
+      <h2>The pipeline</h2>
+      <div class="pipe">
+        <div class="row">
+          <div class="stage">
+            <span class="n">1 · Ingest</span>
+            <span class="t">Corpus → scenes</span>
+            <span class="d">EPUB to chapters to scenes. POV, date, cast, place tagged. Stable IDs. Full-text + vector index.</span>
+          </div>
+          <div class="stage">
+            <span class="n">2 · Extract</span>
+            <span class="t">Story graph</span>
+            <span class="d">Events, observations, reports, beliefs, consequences; entities, objects, promises, threads; per-POV technique spec. Every claim cited and scored.</span>
+          </div>
+          <div class="stage gate">
+            <span class="n">3 · Plan · gate</span>
+            <span class="t">Series → book → chapter cards</span>
+            <span class="d">Ending hypotheses ranked by evidence. Move tournament for surprises. You pick — or the run policy does.</span>
+          </div>
+          <div class="stage">
+            <span class="n">4 · Draft</span>
+            <span class="t">Scene by scene</span>
+            <span class="d">Context pack (~40k tokens) assembled per scene. 2–4 candidates. Cached prefix.</span>
+          </div>
+          <div class="stage">
+            <span class="n">5 · Check</span>
+            <span class="t">Blue pencils</span>
+            <span class="d">Continuity, epistemics, voice drift, repetition, style metrics, discriminator, reader panel. Marginalia with severity.</span>
+          </div>
+          <div class="stage gate">
+            <span class="n">6 · Accept · gate</span>
+            <span class="t">Commit state</span>
+            <span class="d">Accepted chapter is re-extracted; deltas written to the graph. The world advances. Git-versioned.</span>
+          </div>
+        </div>
+        <div class="loop">
+          <span><b>Loop:</b> 5 → 4 until clean or escalated · 6 → 3 for the next chapter card</span>
+          <span><b>Branches:</b> alternate continuations are git branches of the graph</span>
+          <span><b>Backtest harness</b> wraps 2–6 with a hidden book</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= CONFIGURATION ================= -->
+    <div class="margin">
+      <span class="no">Configuration</span>
+      <span class="note">What's series-specific, what's the user's call</span>
+    </div>
+    <div class="body">
+      <h2>Two config files, no hard-coded series</h2>
+      <p>Everything a previous version of this plan phrased as "a decision to make before building" is, on reflection, a setting. There are two kinds, and they're deliberately kept apart: what is true about the <em>series</em>, and what the <em>user</em> wants from this run.</p>
+      <h3>The series profile</h3>
+      <p>Declares the shape of the world so the checkers can reason about it. Most of it is inferred from the corpus in Stage 1 and confirmed by a human; the rest is a few lines of YAML.</p>
+      <pre><span class="c"># profiles/bobiverse.yaml</span>
+narration:
+  mode: first_person_rotating        <span class="c"># or third_close_rotating, frame, single</span>
+  pov_from: chapter_header           <span class="c"># how POV is signalled in the text</span>
+time:
+  calendar: gregorian_offset         <span class="c"># years, real dates; ASOIAF would be "AC"</span>
+space:
+  model: interstellar                <span class="c"># or travel_table, single_city, none</span>
+  distances: data/systems.csv        <span class="c"># light-years between named systems</span>
+information:
+  channels:
+    - {name: radio,  speed: c}           <span class="c"># light-lag applies</span>
+    - {name: SCUT,   speed: instant, available_from: "book 2"}
+entities:
+  aliases: data/aliases.yaml         <span class="c"># Will/Riker, Bob-1/Bob/original</span>
+  clone_lineage: true                <span class="c"># beliefs fork at replication</span>
+style:
+  units: chapter                     <span class="c"># what the technique spec is measured over</span></pre>
+      <p>The <span class="k">information.channels</span> block is the whole reason the profile exists: it turns "could this character know this yet?" into a computation rather than a judgment. For Bobiverse that's light-lag versus SCUT. For a court intrigue it's ravens, riders and roads. For a small-town novel it's gossip and it's instant.</p>
+      <h3>The run policy</h3>
+      <p>Everything about <em>how</em> a run behaves. Each setting has a default; none is baked in.</p>
+      <pre><span class="c"># runs/book6-draft.yaml</span>
+gates:
+  plan:    manual                <span class="c"># manual | auto_if_clean | auto | every_n: 5</span>
+  chapter: auto_if_clean         <span class="c"># auto-accept when every hard check passes</span>
+  act:     manual                <span class="c"># always stop at act breaks</span>
+candidates:
+  per_scene: 3
+  revision_rounds: 2
+context:
+  start_tokens: 30000
+  max_tokens:   50000
+models:
+  plan: claude-fable-5-1
+  draft: claude-opus-5
+  extract: claude-sonnet-5
+  checks: claude-haiku-4-5
+checks:
+  epistemic:  hard
+  geography:  hard
+  repetition: {severity: soft, budget: corpus_baseline}
+  discriminator: floor
+budget:
+  max_usd: 400</pre>
+      <p>So "how much do you want to judge" is answered per run, and can change mid-book: full manual for the first act while you're calibrating trust, <span class="k">auto_if_clean</span> once the checkers have earned it, manual again for the ending. The editor doesn't have to decide their working style before the tool exists.</p>
+    </div>
+
+    <!-- ================= INGEST ================= -->
+    <div class="margin">
+      <span class="no">Stage 1</span>
+      <span class="note">Ingestion</span>
+    </div>
+    <div class="body">
+      <h2>Corpus → scenes</h2>
+      <p>Input is a directory of EPUBs. Output is a SQLite database with one row per scene, plus an FTS5 full-text index and an embedding index (sqlite-vec) over chunks of 300–800 tokens.</p>
+      <p>Scene boundaries come from the text itself (section breaks, POV headers) with a model pass to split long chapters where the break is implicit. Each scene carries metadata the later stages query on:</p>
+      <ul>
+        <li><span class="k">book · chapter · scene · pov</span> — the address every citation uses</li>
+        <li><span class="k">date_inworld</span> — a best-estimate in-world date in the profile's calendar, with an uncertainty range, so the time and information-path checks have something to work with</li>
+        <li><span class="k">cast · place</span> — who is on the page and where</li>
+        <li><span class="k">tokens · words</span> — so pacing baselines can be computed per POV</li>
+      </ul>
+      <p>If a volume exists only as audio, ingestion gains a transcription step, and two things get harder: chapter headers and paragraph breaks are gone, so scene segmentation leans on the model pass; and proper nouns come out mangled, so a normalisation pass matches transcribed names against the entity list built from the earlier volumes before anything else runs.</p>
+      <p>Nothing clever happens here on purpose. Ingestion is deterministic and re-runnable; every downstream artefact is derived from it and can be regenerated.</p>
+    </div>
+
+    <!-- ================= EXTRACT ================= -->
+    <div class="margin">
+      <span class="no">Stage 2</span>
+      <span class="note">The story graph — cited, scored, never silently resolved</span>
+    </div>
+    <div class="body">
+      <h2>The story graph</h2>
+      <p>This is the expensive one-time step and the thing that makes everything else cheap. Extraction runs as batch jobs over every scene with structured outputs, so each record is schema-valid and carries the scene ID and quote that supports it. A claim with no citation is rejected at write time — but a citation only proves the text contains <em>evidence related to</em> the claim, not that the claim is right. So every record also carries a claim type (<span class="k">explicit · inferred · disputed</span>), a confidence, and any alternative readings. Contradictions between scenes are stored as unresolved records with both interpretations, never overwritten: in a series built on unreliable narrators, the contradiction is often the story.</p>
+      <p>The fundamental object is not a fact but an <strong>event</strong>, with the paths by which knowledge of it travelled. That is what lets a checker answer the question that matters — "is there an information path from this event to this character?" — rather than merely "is this true?"</p>
+      <div class="ledger">
+        <div class="row"><div class="h">Entities</div><div class="v"><p>Characters, factions, places, objects. Aliases resolved from the profile ("Will", "Riker", "Bob-3" are one node) so retrieval doesn't miss a scene because of a nickname. Physical and embodied state tracked — for a series where minds move between bodies, "where is this character" and "what hardware are they running on" are separate fields.</p></div></div>
+        <div class="row"><div class="h">Timeline</div><div class="v"><p>Ordered events with in-world dates and dependencies. Also what each POV character <em>believes</em> happened — two Bobs in different systems hold different timelines of the same war, and both differ from the reader's.</p></div></div>
+        <div class="row"><div class="h">Event &amp; belief graph</div><div class="v"><p>The single most important structure. Each event has <em>observers</em> (who was there), <em>reports</em> (who told whom, when, over which channel, and how distorted), and per-character <em>beliefs</em> — including false ones — plus what the reader has been shown. Beliefs are dated and versioned, so "what did Riker believe on the day of chapter 47" is a query. When a character is cloned, the clone inherits the parent's beliefs as of that moment and diverges from there. Continuity checking in Stage 5 is mostly path queries against this graph, using the profile's information channels.</p></div></div>
+        <div class="row"><div class="h">Consequences</div><div class="v"><p>Narrative physics. Every major event carries cause and consequence edges: what it cost, which options it closed, which obligations it created, which promises it made impossible. The planner runs a <em>consequence audit</em> — an accepted event that changes nothing downstream is flagged as inert. This is the difference between a novel whose 400th page happens <em>because of</em> its 100th and five hundred pages of competent scenes.</p></div></div>
+        <div class="row"><div class="h">Relationships</div><div class="v"><p>Directed edges with sentiment, obligation, and history. "Owes a debt", "swore an oath", "suspects", "loved once". Edges are dated so they can change.</p></div></div>
+        <div class="row"><div class="h">Object registry</div><div class="v"><p>Chekhov's inventory. Named swords, letters, eggs, horns, coins — where each one is, who holds it, and whether the text has flagged it as significant. A sword can't be in two places.</p></div></div>
+        <div class="row"><div class="h">Promise ledger</div><div class="v"><p>Every prophecy, vow, foreshadowing beat, and dangling setup, with a confidence score and the scenes that plant it. This is the raw material for invention: a good twist cashes a promise the text already made.</p></div></div>
+        <div class="row"><div class="h">Open threads</div><div class="v"><p>Plotlines with their last known state and the characters attached. The book outline in Stage 3 is essentially a schedule for advancing these.</p></div></div>
+        <div class="row"><div class="h">Technique spec, per POV</div><div class="v"><p>Two layers. The measured layer: sentence-length distribution, dialogue ratio, sensory density, interiority ratio — numbers the voice checker can compute. The mechanism layer: narrative distance, how exposition is delivered (Bill: as an engineer's project log with asides; Riker: through the grind of Earth politics), how emotion is disclosed (deflected into a pop-culture reference, usually), recurring devices (the running gag, the self-aware aside, the moral inventory). Canon exemplars are tagged with these mechanisms and with situation, so a Bill scene mid-build retrieves Bill-mid-build <em>and</em> Bill-deflecting-with-a-joke. When POVs are clones of one voice, the spec records what drifted — that's the series' own story. The target is not "sounds like the author"; it is "behaves like this POV in this situation."</p></div></div>
+      </div>
+      <h3>What a record looks like</h3>
+      <pre><span class="c">// one event in the graph, with its information paths</span>
+{
+  "event_id": "E-0311",
+  "summary": "Milo is destroyed by a Brazilian probe at Omicron² Eridani",
+  "when": {"date": "&lt;profile calendar&gt;", "certainty": "canonical"},
+  "where": "Omicron² Eridani",
+  "observed_by": ["Milo"],                       <span class="c">// final transmission only</span>
+  "reports": [
+    {"from": "Milo", "to": "Bill", "channel": "radio",
+     "arrives": "&lt;computed: distance / c&gt;", "status": "explicit"},
+    {"from": "Bill", "to": "Riker", "channel": "radio",
+     "arrives": "&lt;computed&gt;", "status": "inferred", "confidence": 0.7}
+  ],
+  "beliefs": {
+    "Bill":  {"state": "knows",   "as_of": "&lt;arrival date&gt;"},
+    "Riker": {"state": "unaware", "as_of": "&lt;before second arrival&gt;"}
+  },
+  "reader_state": "shown directly",
+  "consequences": ["Omicron² Eridani colonisation blocked",
+                   "Brazilian probe threat confirmed for every Bob",
+                   "promise P-0021 (Milo's survey) closed"],
+  "claim_type": "explicit",
+  "citations": [{"scene": "WAL.xx.Milo", "quote": "..."}]
+}</pre>
+      <p>The <span class="k">arrives</span> fields are not extracted; they're computed from the profile's space model and channel speeds. That is the whole trick: the checker doesn't ask a model whether Riker could know yet. It does the arithmetic.</p>
+      <p>Extraction is deliberately over-inclusive on the first pass and pruned by a second, cheaper pass that merges duplicates, scores confidence, and records contradictions between scenes as open records rather than resolving them.</p>
+    </div>
+
+    <!-- ================= PLAN ================= -->
+    <div class="margin">
+      <span class="no">Stage 3</span>
+      <span class="note">Planning — where surprise actually comes from</span>
+    </div>
+    <div class="body">
+      <h2>Planning is a tournament, not a prompt</h2>
+      <p>Prior attempts asked the model for an outline and took the first answer. That produces the median continuation — competent, predictable, slightly dull. Blue Pencil treats planning as search with a human judge.</p>
+      <h3>Series thesis</h3>
+      <p>Before any chapter is planned, the engine drafts several <em>ending hypotheses</em> — full-series resolutions — and scores each on evidence from the promise ledger: how many planted setups it pays off, how many it orphans, whether it fits the author's public statements and the structural symmetries the text has already set up. The human picks one (or edits one). Everything downstream serves it.</p>
+      <h3>Book skeleton</h3>
+      <p>The book outline mirrors the series' actual shape, computed from the corpus rather than assumed: chapter count, POV slate and rotation rhythm, act breaks, the ratio of quiet chapters to turning points. Every long series has a measurable cadence — how often it cuts between POVs, how many plotlines it keeps in the air — and the skeleton copies it.</p>
+      <h3>Move tournament</h3>
+      <p>For each open thread at each act break, a generator proposes eight to twelve candidate <em>moves</em> — what could happen next. Each is scored by separate judges on:</p>
+      <ul>
+        <li><strong>Setup</strong> — does it cash promises already in the ledger?</li>
+        <li><strong>Cost</strong> — is it irreversible? Does someone lose something real?</li>
+        <li><strong>Character truth</strong> — would this person do this, given their ledger entries?</li>
+        <li><strong>Inevitable in hindsight</strong> — surprising now, obvious later. The Red Wedding test.</li>
+        <li><strong>Futures opened</strong> — how many interesting states does this move create? "A and B agree to cooperate" opens almost nothing. "A learns B's secret, B realises A knows, both pretend otherwise" opens a dozen. This is the closest thing to a computable definition of <em>interesting</em>.</li>
+      </ul>
+      <p>At act breaks the search goes two moves deep: each surviving move is expanded into its own next moves, and a move is scored partly on the quality of the futures it leads to. It is not Monte Carlo in any rigorous sense, but it is search rather than sampling, and it stops the engine choosing a good scene that leads nowhere.</p>
+      <p>The top three go to the human with their scores, their consequence edges, and the citations behind them. This is the one place invention happens, and it's the place a human should spend their attention.</p>
+      <h3>Chapter cards</h3>
+      <p>A chapter card is the contract between planning and drafting. It is a structured record, not prose: POV, in-world date, location, cast present, the character's goal, the turn, what is revealed and to whom (this writes to the belief graph on acceptance), threads advanced, seeds planted, seeds paid, consequences expected, and the word budget. The drafter may not add a reveal the card doesn't contain.</p>
+    </div>
+
+    <!-- ================= DRAFT ================= -->
+    <div class="margin">
+      <span class="no">Stage 4</span>
+      <span class="note">Drafting — assembling the context pack</span>
+    </div>
+    <div class="body">
+      <h2>Drafting</h2>
+      <p>Each scene is written from a context pack assembled by queries rather than by dumping books in. It starts at the policy's <span class="k">start_tokens</span> (default 30k) — hard state, immediate narrative context, a handful of canon exemplars, technique guidance, constraints — and grows toward <span class="k">max_tokens</span> only when a checker's marginalia asks for more (an information-path failure pulls in the relevant channel and distance data; a voice-drift failure pulls in more exemplars). More context is not free: past a point it is a conference room full of documents for one conversation, and the backtest ablations decide where that point is. The pack has a fixed order so its stable front half is cached across every call in the book:</p>
+      <pre><span class="c">// context pack, in render order — stable prefix first</span>
+<span class="b">[cached]</span>
+  engine rules + house style (what the engine must never do)
+  series bible digest            <span class="c">// ~8k tokens, regenerated per act</span>
+  style spec for this POV        <span class="c">// numbers + exemplar constructions</span>
+<span class="b">[per chapter]</span>
+  chapter card
+  POV character state: location, body/hardware, knows / believes-false, goals
+  4–8 canon exemplars: same POV, similar situation + technique tags   <span class="c">// voice by retrieval, not fine-tuning</span>
+  summaries of the previous 3 chapters + the previous chapter in this POV
+  phrase ledger: distinctive phrases used in the last 40k words  <span class="c">// do not reuse</span>
+<span class="b">[per scene]</span>
+  scene beats · word budget · "write scene 2 of 4"</pre>
+      <p>Voice comes from retrieved exemplars — canon passages in the same POV, matched on situation and on the technique tags from the spec, not on surface similarity. The exemplars show <em>how this POV handles this kind of moment</em>; the technique spec says why. This is few-shot by retrieval, it beats "write like the author" instructions by a wide margin, and nothing is trained on the text.</p>
+      <p>Every scene is drafted <span class="k">candidates.per_scene</span> times. Candidates are ranked by the Stage 5 judges before a human ever sees them, so the human reads the best one and the marginalia, not a pile.</p>
+      <div class="marg">
+        <span class="lbl">Model defaults</span>
+        <p>The run policy sets a model per stage; the defaults are Claude Opus 5 with adaptive thinking at high effort for drafting and chapter planning, and Claude Fable 5.1 for the move tournament and series thesis — the hardest judgment calls. Long drafts stream with a 128k output ceiling. Chapter cards and every graph record use structured outputs so nothing downstream parses prose. Fiction gets violent; the pipeline handles the <span class="k">refusal</span> stop reason with server-side fallbacks rather than crashing mid-chapter.</p>
+      </div>
+    </div>
+
+    <!-- ================= CHECK ================= -->
+    <div class="margin">
+      <span class="no">Stage 5</span>
+      <span class="note">The blue pencils</span>
+    </div>
+    <div class="wide">
+      <h2>Editorial checks</h2>
+      <p style="max-width:66ch">Each checker reads a draft plus the graph and emits marginalia: a location in the text, a severity, a reason, and where possible the citation it conflicts with. Hard failures send the scene back to Stage 4 with the marginalia attached. Soft ones accumulate for the human as a scorecard — continuity, character fidelity, causal coherence, surprise, payoff, prose, repetition, exposition — that is never collapsed into one number. A single score hides exactly the trade-offs an editor needs to see.</p>
+      <div class="checks">
+        <div class="check"><span class="t">Epistemic check <span class="sev">hard</span></span><span class="d">Does any character act on, mention, or react to an event no information path could have delivered to them by this date? The classic AI-fanfic failure — a Bob reacting to news that is still years out in transit — is a query against the graph and the profile's channels, not a judgment call.</span></div>
+        <div class="check"><span class="t">Geography &amp; time <span class="sev">hard</span></span><span class="d">Can this character physically be here on this date, given where the last accepted chapter left them and the profile's space model — travel tables, or distance over speed?</span></div>
+        <div class="check"><span class="t">Object &amp; body check <span class="sev">hard</span></span><span class="d">Dead characters stay dead, unless the profile says backups exist — and then the restore has to be on the page. Named objects are where the registry says they are.</span></div>
+        <div class="check"><span class="t">Card compliance <span class="sev">hard</span></span><span class="d">The scene contains the reveals on the card and no others. Uncarded reveals are the easiest way to corrupt the ledger.</span></div>
+        <div class="check"><span class="t">Repetition auditor <span class="sev soft">soft → hard</span></span><span class="d">N-gram and motif frequencies compared against the canon baseline for this POV and against the phrase ledger of recent chapters. Every series has its "cold, wind, darkness, blood" — the auditor computes the budget from the corpus rather than guessing it, and exceeding it is a failure, not a note.</span></div>
+        <div class="check"><span class="t">Voice drift <span class="sev soft">soft</span></span><span class="d">Sentence-length distribution, interiority ratio, dialogue ratio, sensory density measured against this POV's style spec. Reports the distance, not an opinion.</span></div>
+        <div class="check"><span class="t">Discriminator <span class="sev soft">floor only</span></span><span class="d">A judge is shown canon and generated passages unlabeled and asked which is which. High confidence flags a scene; low confidence proves nothing — bland prose is also hard to tell from mediocre canon. This is a floor against obviously machine-made text, never an optimisation target. Optimising for it produces beige.</span></div>
+        <div class="check"><span class="t">Consequence audit <span class="sev soft">soft</span></span><span class="d">Does the scene generate the consequences its card promised? Does anything in it change a future state? A scene that leaves the world exactly as it found it is questioned, not cut — quiet chapters exist — but it has to be quiet on purpose.</span></div>
+        <div class="check"><span class="t">Reader panel <span class="sev soft">soft</span></span><span class="d">Three personas — a first-time reader, a wiki-editing superfan, a line editor — each score the scene for boredom, exposition, and payoff. Their disagreements are the interesting output.</span></div>
+      </div>
+      <div class="marg red" style="max-width:66ch">
+        <span class="lbl">Continuity violation — example marginalium</span>
+        <p><span class="k">ch17.s2 · line 41</span> — Riker refers to Milo's destruction. Event E-0311: the only channel from Omicron² Eridani at this date is radio; earliest arrival at Sol is <span class="k">&lt;computed&gt;</span>, after this chapter's date. Riker's belief state is <span class="k">unaware</span>. Fixes: (1) move the line to a chapter after arrival, (2) route the news through a Bob who could have it and put that on the page, (3) cut it.</p>
+      </div>
+    </div>
+
+    <!-- ================= ACCEPT ================= -->
+    <div class="margin">
+      <span class="no">Stage 6</span>
+      <span class="note">Accepting a chapter moves the world</span>
+    </div>
+    <div class="body">
+      <h2>State commit</h2>
+      <p>When a chapter is accepted — by a person, or by the run policy when every hard check passes — the extraction agents from Stage 2 run on the <em>generated</em> text exactly as they ran on canon, and the resulting deltas — new events, new reports and beliefs, new wounds, new promises, consequences, threads closed — are written to the graph with citations pointing at the accepted chapter. From then on retrieval treats it as canon.</p>
+      <p>This is what makes chapter 60 consistent with chapter 3 without either of them being in context. The graph is the memory; the chapters are its journal. And because beliefs are dated, the state of the world immediately before any chapter is reconstructible — "what did every Bob believe going into chapter 47" is a checkout, not a guess.</p>
+      <p>The graph lives as markdown and SQLite in a git repository. Each accepted chapter is a commit. Alternate continuations are branches, and a wrong turn in chapter 30 is a reset, not a rewrite. Human edits to any graph file are first-class — if you correct a belief by hand, the engine works from your correction.</p>
+    </div>
+
+    <!-- ================= EVAL ================= -->
+    <div class="margin">
+      <span class="no">Evaluation</span>
+      <span class="note">Backtest before you write the unknown</span>
+    </div>
+    <div class="body">
+      <h2>The backtest, with a contamination control</h2>
+      <p>Everything above could be built and still produce plausible garbage. The way to know is to hide a book that exists — but there is a catch v0.1 missed: the model may have read it. Any series famous enough to have a wiki is in every frontier model's training data. Score "did we reproduce the real book" naively and the benchmark looks spectacular for the wrong reason.</p>
+      <p>So the backtest has a control and three tiers. The development corpus is Bobiverse: books one through five are the training side, the newest volume is the hidden book.</p>
+      <h3>Control: what does the model already know?</h3>
+      <p>Before any run, the model is asked — with no corpus, no graph — to outline the hidden book chapter by chapter. Whatever it recalls is the contamination baseline. Plot recall from the full pipeline only counts to the extent it <em>beats</em> that baseline, and any event the bare model already knew is excluded from the score. This doesn't make the corpus clean; it makes the contamination measurable.</p>
+      <h3>Tier A — shape</h3>
+      <p>Does the generated book have the series' proportions? POV distribution, chapter-length distribution, plotlines running in parallel, geographic spread, threads opened versus closed, setup-to-payoff ratio, cadence of turning points. These are compared to the real hidden book and can't be gamed by memory — the model can't recite a distribution.</p>
+      <h3>Tier B — constraints</h3>
+      <p>Given only the earlier books, does the generated one obey every constraint a legitimate next volume must? Every belief has an information path. Nobody is in two places. Dead stays dead. Objects stay where they were put. This is the graph and the checkers scoring themselves, and it needs no answer key at all.</p>
+      <h3>Tier C — genuinely blind</h3>
+      <p>A hidden book the model cannot have seen: one published after its training cutoff. Continue from the volume before it; score against the real one. This is the only tier that tests prediction rather than reconstruction, and one honest run of it is worth more than any number of runs on a famous series.</p>
+      <p><strong>The newest Bobiverse volume is the candidate.</strong> The contamination probe decides whether it qualifies — a bare-model outline that comes back empty is the admission ticket. If it passes, the same corpus serves all three tiers, and it is an unusually good one:</p>
+      <ul>
+        <li><strong>Light-lag is a native information-path test.</strong> Bobs in different systems learn of events years apart before SCUT relays and instantly after; the belief graph's "is there a path from this event to this character by this date" query has the story's own physics behind it.</li>
+        <li><strong>Many first-person POVs that began as one person.</strong> Replicative drift is the series' own version of voice drift. The technique spec has to separate Bill from Riker from Howard — a harder, more honest style test than two characters who were never alike.</li>
+        <li><strong>Five prior books, roughly half a million words, about 700k tokens.</strong> The entire series fits in a single 1M context, which unlocks an ablation a bigger series can't offer: whole series in context versus the graph. If the graph doesn't beat brute force where brute force is possible, that's worth knowing in week nine, not week thirty.</li>
+        <li><strong>Comedic, reference-dense, present-day idiom</strong> stresses the technique spec somewhere third-person grimdark never would.</li>
+      </ul>
+      <p>Across all tiers: repetition index against the real book's own baseline, and blind human ratings — a small panel reads unlabeled chapters, real and generated. That last one is still the number that ultimately matters.</p>
+      <p>The backtest is also the development loop. Ablations — drop the belief graph, drop retrieved exemplars, drop the repetition auditor, halve the context pack — show which parts of the engine are earning their cost. Spend fifty dollars finding out whether a checker helps before spending a week making it cheaper.</p>
+      <div class="marg">
+        <span class="lbl">Editor's note</span>
+        <p>If the probe shows the model already knows the new volume, Tiers A and B still run on it — shape and constraints don't need blindness beyond the baseline — and Tier C goes shopping for another post-cutoff series. Tier C is where the engine is actually on trial; nothing else in the plan substitutes for it.</p>
+      </div>
+    </div>
+
+    <!-- ================= COST ================= -->
+    <div class="margin">
+      <span class="no">Models &amp; cost</span>
+      <span class="note">Unit rates, then two worked totals</span>
+    </div>
+    <div class="wide">
+      <h2>What it costs to run</h2>
+      <p style="max-width:66ch">Cost scales with two things: corpus size (extraction, once) and generated length (everything else, per book). Rates below assume the default model policy, three candidates per scene, two revision rounds, extraction through the Batch API at half price, and a cached drafting prefix. Current first-party API rates; order of magnitude, not a quote.</p>
+      <div class="tbl">
+        <table>
+          <tr><th>Stage</th><th>Default model</th><th>Why this one</th><th class="num">Scales with</th><th class="num">Unit rate</th></tr>
+          <tr><td>Extraction (4 passes)</td><td>Sonnet 5, batch</td><td>Volume work with strict schemas; half price asynchronously</td><td class="num">corpus tokens</td><td class="num">$10–15 per 1M</td></tr>
+          <tr><td>Series thesis · move tournaments</td><td>Fable 5.1</td><td>Highest-judgment calls; small token count</td><td class="num">per book</td><td class="num">$35–50</td></tr>
+          <tr><td>Chapter cards · scene beats</td><td>Opus 5</td><td>Structured planning, adaptive thinking</td><td class="num">generated words</td><td class="num">$7 per 100k</td></tr>
+          <tr><td>Drafting (3 × 2)</td><td>Opus 5, streamed</td><td>Best prose per dollar; cached prefix cuts input cost ~10×</td><td class="num">generated words</td><td class="num">$25–35 per 100k</td></tr>
+          <tr><td>Hard checks</td><td>SQLite + Haiku 4.5</td><td>Mostly deterministic; model only classifies mentions</td><td class="num">generated words</td><td class="num">$3 per 100k</td></tr>
+          <tr><td>Soft checks · judges · reader panel</td><td>Sonnet 5</td><td>Many small calls; judgment without the top tier's price</td><td class="num">generated words</td><td class="num">$10 per 100k</td></tr>
+        </table>
+      </div>
+      <div class="tbl">
+        <table>
+          <tr><th>Worked total</th><th class="num">Corpus</th><th class="num">Book</th><th class="num">Extraction</th><th class="num">One book</th><th class="num">+ one backtest run</th></tr>
+          <tr><td class="serif">Bobiverse-scale</td><td class="num">0.7M tokens</td><td class="num">~110k words</td><td class="num">$10</td><td class="num">$90–140</td><td class="num">≈ $200–280</td></tr>
+          <tr><td class="serif">Epic-scale (five doorstops)</td><td class="num">2.4M tokens</td><td class="num">~400k words</td><td class="num">$30</td><td class="num">$220–330</td><td class="num">≈ $450–650</td></tr>
+        </table>
+      </div>
+      <p style="max-width:66ch">The model split is a policy setting, not a law: running every stage on Opus 5 costs roughly double and is the right call if the cheaper stages show up in the backtest ablations. Spend the money on ablations before spending effort on savings. The dominant cost either way is human attention at whatever gates the policy leaves manual.</p>
+    </div>
+
+    <!-- ================= STACK ================= -->
+    <div class="margin">
+      <span class="no">Stack</span>
+      <span class="note">Boring on purpose</span>
+    </div>
+    <div class="body">
+      <h2>Repository shape</h2>
+      <pre>bluepencil/
+  profiles/          <span class="c">// one YAML per series: bobiverse.yaml …</span>
+  runs/              <span class="c">// run policies: gates, candidates, models, budget</span>
+  corpus/            <span class="c">// EPUBs / transcripts (gitignored)</span>
+  graph/             <span class="c">// markdown + sqlite, git-versioned, human-editable</span>
+    events/  beliefs/  entities/  objects/  promises/  threads/  style/
+  plan/
+    thesis.md  book7/skeleton.md  book7/cards/ch01.json …
+  drafts/            <span class="c">// candidates + marginalia per scene</span>
+  accepted/          <span class="c">// the manuscript; one commit per chapter</span>
+  eval/              <span class="c">// probe results, backtest runs, ablations, rating sheets</span>
+  bp/                <span class="c">// the engine — knows no series</span>
+
+$ bp probe --book 6 --profile bobiverse     <span class="c">// contamination check, no corpus</span>
+$ bp ingest corpus/ --profile bobiverse
+$ bp extract --batch
+$ bp check chapter.md                       <span class="c">// the editor, on anyone's chapter</span>
+$ bp backtest --hide 6
+$ bp plan thesis --run runs/book7.yaml
+$ bp draft ch17 --run runs/book7.yaml
+$ bp accept ch17</pre>
+      <ul>
+        <li><strong>Python 3.12</strong>, the <code>anthropic</code> SDK, <code>pydantic</code> schemas shared between structured outputs and the database.</li>
+        <li><strong>SQLite</strong> with FTS5 and sqlite-vec — one file, no services, trivially branchable with git.</li>
+        <li><strong>ebooklib</strong> for ingestion; deterministic scene splitting with a model fallback.</li>
+        <li><strong>Review surface:</strong> marginalia rendered as a local HTML page per chapter — draft on the left, blue pencils in the margin, accept/reject buttons that call <code>bp</code>. Only appears at gates the run policy leaves manual. No web app until the CLI proves the loop.</li>
+      </ul>
+    </div>
+
+    <!-- ================= ROADMAP ================= -->
+    <div class="margin">
+      <span class="no">Roadmap</span>
+      <span class="note">Each phase has an exit test</span>
+    </div>
+    <div class="wide">
+      <h2>Build order</h2>
+      <p style="max-width:66ch">The order changed in v0.2: the Continuity Editor ships before any generation exists. It is useful on its own — point it at a human-written fan chapter and it marks it up — and it is the cheapest possible proof that the story graph works. If the graph can't catch a planted error in a chapter someone else wrote, there is no point drafting one.</p>
+      <div class="phases">
+        <div class="phase"><span class="n">Phase 0 · week 1</span><span class="t">Ingest</span><ul><li>EPUB → scenes with metadata</li><li>FTS5 + vector index</li><li>Corpus statistics per POV</li></ul><span class="exit"><b>Exit:</b> "every Bill scene mid-build" returns the right scenes; the profile's channels and distances load.</span></div>
+        <div class="phase"><span class="n">Phase 1 · weeks 2–4</span><span class="t">Story graph</span><ul><li>SQLite schema: events, observations, reports, beliefs, consequences, entities, objects, promises, threads</li><li>First 10–15 extraction prompts, run via batch</li><li>Citation + confidence + contradiction records; arrival dates computed from the profile</li></ul><span class="exit"><b>Exit:</b> a 50-claim spot audit passes at ≥ 95%; five known canon contradictions are stored unresolved, not flattened.</span></div>
+        <div class="phase"><span class="n">Phase 2 · weeks 5–7</span><span class="t">Continuity Editor · v0.1 ships</span><ul><li>Hard checkers: information paths, geography, objects, bodies</li><li>Repetition auditor + technique spec</li><li>Review page: draft left, blue pencils in the margin</li></ul><span class="exit"><b>Exit:</b> 20 errors planted in a fan chapter; ≥ 18 caught, ≤ 2 false alarms per chapter.</span></div>
+        <div class="phase"><span class="n">Phase 3 · weeks 8–9</span><span class="t">Backtest harness</span><ul><li>Contamination probe</li><li>Tier A shape metrics, Tier B constraint scoring</li><li>Contamination probe on the newest volume decides whether Tier C runs here</li></ul><span class="exit"><b>Exit:</b> a single-prompt continuation scores measurably worse than nothing on Tiers A and B.</span></div>
+        <div class="phase"><span class="n">Phase 4 · weeks 10–12</span><span class="t">Planning</span><ul><li>Series thesis with evidence scoring</li><li>Book skeleton from corpus cadence</li><li>Move tournament, two-deep at act breaks, chapter cards</li></ul><span class="exit"><b>Exit:</b> Tier A shape within tolerance; plot recall beats the contamination baseline.</span></div>
+        <div class="phase"><span class="n">Phase 5 · weeks 13–16</span><span class="t">Draft loop</span><ul><li>Adaptive context pack + caching</li><li>Soft checkers, scorecard, state commit on accept</li><li>Run-policy gates: manual, auto_if_clean, every_n</li><li>Ablations on the hidden book, including whole-series-in-context</li></ul><span class="exit"><b>Exit:</b> Tier C run completes; blind panel can't reliably rank generated chapters last.</span></div>
+        <div class="phase"><span class="n">Phase 6 · weeks 17+</span><span class="t">The real book</span><ul><li>Full run on the target series with its own profile</li><li>Gates set by policy, tightened for the ending</li><li>Branch at least one alternate ending</li></ul><span class="exit"><b>Exit:</b> a manuscript you'd argue about with another reader.</span></div>
+      </div>
+    </div>
+
+    <!-- ================= RISKS ================= -->
+    <div class="margin">
+      <span class="no">Risks</span>
+      <span class="note">Named now so they're not discovered later</span>
+    </div>
+    <div class="body">
+      <h2>What could still go wrong</h2>
+      <div class="ledger">
+        <div class="row"><div class="h">Invention ceiling</div><div class="v"><p>The tournament raises the floor; it may not raise the ceiling. If the backtest shows the real book's biggest turns never appear in the top three, the human's role shifts from judge to co-author, and the engine becomes an editor for a human plot. That is still a good product.</p></div></div>
+        <div class="row"><div class="h">Graph errors compound</div><div class="v"><p>A wrong belief entry propagates into every chapter after it, and a citation does not make a claim true. Mitigations: confidence and claim-type on every record, contradictions kept open, the Phase 1 audit, the planted-error test in Phase 2, and the reader-panel superfan persona whose entire job is to catch this.</p></div></div>
+        <div class="row"><div class="h">Benchmark contamination</div><div class="v"><p>Any famous series is in the training data; a good backtest score on one can be memory wearing a lab coat. Mitigations: the contamination probe, shape and constraint tiers that memory can't game, and one genuinely post-cutoff corpus.</p></div></div>
+        <div class="row"><div class="h">Living authors, unfinished work</div><div class="v"><p>This is fan work for private reading, and several of the authors whose series make good corpora are on record against AI use of their books. The engine builds a technique <em>specification</em> from published text and retrieves exemplars at runtime; it does not fine-tune on the books, and nothing it produces is for distribution. Keep it that way.</p></div></div>
+        <div class="row"><div class="h">Profile errors</div><div class="v"><p>If the profile says a channel is instant when the books treat it as delayed, every information-path check is confidently wrong. Mitigation: the profile is inferred from the corpus and shown to a human with the evidence, and the planted-error test in Phase 2 includes profile-level mistakes.</p></div></div>
+        <div class="row"><div class="h">Refusals mid-chapter</div><div class="v"><p>The genre is violent. Plan for the <span class="k">refusal</span> stop reason with fallbacks and scene-level retries; never let a refused scene silently become a blank in the manuscript.</p></div></div>
+        <div class="row"><div class="h">Human attention</div><div class="v"><p>Two gates per chapter across 70+ chapters is a real commitment. The review page has to make a chapter reviewable in ten minutes, or the gates get rubber-stamped and the whole design fails quietly.</p></div></div>
+      </div>
+    </div>
+
+    <!-- ================= DECISIONS ================= -->
+    <div class="margin">
+      <span class="no">Decisions needed</span>
+      <span class="note">Before Phase 0 starts</span>
+    </div>
+    <div class="body">
+      <h2>Two things only you can decide</h2>
+      <ol>
+        <li><strong>The target series.</strong> The development and backtest corpus is Bobiverse, because it's in hand and it's a good test. The series you actually want to continue is a separate question and only needs answering by Phase 6 — it gets its own profile and nothing else changes. One neat option: if the newest Bobiverse volume proves blind, the same corpus can graduate from test subject to target — prove the engine on book six, then point it at book seven.</li>
+        <li><strong>The blind corpus — provisionally settled.</strong> The newest Bobiverse volume is the candidate, pending the contamination probe. If the bare model can outline it, it's burnt and the search for a post-cutoff series resumes; if it can't, Tier C is funded and the only honest test in the plan has its subject.</li>
+      </ol>
+      <p>Two earlier "decisions" are gone. How much the human judges is run policy, changeable per run and per act. Whether the editor ships alone is the plan: Stages 2, 5 and 6 work on <em>any</em> manuscript, including a human's fan continuation, and they ship in Phase 2 as a tool in their own right. The generator follows only once the editor has proved the graph.</p>
+    </div>
+
+  </div>
+
+  <div class="fin">
+    <span>Blue Pencil · engineering plan v0.3</span>
+    <span>Corpus figures approximate · API rates as of Sept 2026 · series-specific knowledge lives in profiles/</span>
+  </div>
+
+</div>
+
+</body></html>

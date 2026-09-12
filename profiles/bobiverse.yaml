@@ -1,0 +1,33 @@
+# Bobiverse — the plan's worked example, and the development corpus.
+#
+# Nothing in bp/ knows this file exists. Swap it for another and the same
+# machinery runs on a different series.
+name: bobiverse
+
+narration:
+  mode: first_person_rotating      # many POVs that began as one person
+  pov_from: chapter_header
+
+time:
+  calendar: gregorian_offset       # real dates, offset into the future
+
+space:
+  model: interstellar
+  distances: data/bobiverse-systems.csv
+  travel_speed: 0.5c               # what a von Neumann probe manages under drive
+
+information:
+  # The whole reason this file exists. Light-lag versus an instant relay is
+  # arithmetic, not a judgment call — and the relay does not exist in book one,
+  # which is exactly the case a naive checker gets confidently wrong.
+  channels:
+    - {name: radio, speed: c}
+    - {name: SCUT,  speed: instant, available_from: "book 2"}
+
+entities:
+  aliases: data/bobiverse-aliases.yaml
+  clone_lineage: true              # beliefs fork at replication
+  revivable: true                  # minds are backed up — but show the restore
+
+style:
+  units: chapter

@@ -1,0 +1,15 @@
+from,to,light_years
+# Approximate separations between named systems, in light years. These set every
+# signal-transit and travel-time computation, so they are worth getting right:
+# a wrong distance makes every information-path check confidently wrong.
+Sol,Epsilon Eridani,10.5
+Sol,Alpha Centauri,4.4
+Sol,Delta Eridani,29.5
+Sol,Omicron2 Eridani,16.3
+Sol,Poseidon,15.0
+Epsilon Eridani,Alpha Centauri,10.4
+Epsilon Eridani,Omicron2 Eridani,7.8
+Epsilon Eridani,Delta Eridani,20.0
+Alpha Centauri,Omicron2 Eridani,15.5
+Omicron2 Eridani,Poseidon,12.0
+Delta Eridani,Poseidon,25.0
