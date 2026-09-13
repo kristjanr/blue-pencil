@@ -40,7 +40,7 @@ import statistics
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .checks import CheckContext, Scorecard, run_checks
 from .db import Graph
@@ -55,7 +55,14 @@ from .textstats import words
 # --------------------------------------------------------------------- control
 class _Outline(BaseModel):
     knows_the_book: bool
-    confidence: float
+    #: An unexplained field gets answered in whichever sense the model picks.
+    #: Asked bare, it returned 0.90 meaning "sure that I do NOT know this",
+    #: which the consumer read as "sure that it DOES" and inverted the verdict.
+    #: Say which sense is wanted.
+    confidence: float = Field(
+        description="0-1: how confident you are in the knows_the_book answer "
+                    "itself, whichever way that answer went."
+    )
     chapters: list[str] = []
     key_events: list[str] = []
     note: str = ""
@@ -72,8 +79,17 @@ class ProbeResult:
     @property
     def blind(self) -> bool:
         """A bare-model outline that comes back empty is the admission ticket
-        for Tier C."""
-        return not self.knows and self.confidence < 0.25
+        for Tier C.
+
+        Empty hands are the evidence, not the self-report. A model that claims
+        to know the book but recalls nothing is being agreeable; one that denies
+        knowing it and then lists real events is contaminated regardless of what
+        it said. Confidence only guards against a hedged denial — it is not the
+        measurement, because its scale was read backwards once already and a
+        benchmark that declares itself void on a misread float is worse than no
+        benchmark.
+        """
+        return not self.knows and not self.recalled_events and self.confidence >= 0.5
 
     def render(self) -> str:
         verdict = ("BLIND — this volume qualifies as a Tier C corpus"
