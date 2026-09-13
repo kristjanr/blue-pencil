@@ -123,8 +123,17 @@ _CLAIM_SQL = {
 }
 
 
-def check_grounding(graph, *, min_terms: int = 2) -> Report:
-    """Test every citation against the scene it names."""
+def check_grounding(graph, *, min_terms: int = 2, common_at: float = 0.05) -> Report:
+    """Test every citation against the scene it names.
+
+    ``common_at`` is what stops this measuring nothing. A term only counts as
+    evidence if it is *rare*: "Herschel" appearing in a scene means something,
+    "unknown" or "Bob" does not, and in this series nearly every narrator is a
+    Bob. Rather than hand-maintain a list of words to ignore — which would need
+    revising for every new series — take the corpus's own word: a term found in
+    more than this fraction of scenes cannot discriminate between scenes, so it
+    is dropped from the test.
+    """
     scenes, povs = {}, {}
     for r in graph.conn.execute("SELECT scene_id, text, pov FROM scenes"):
         scenes[r["scene_id"]] = _norm(r["text"])
@@ -143,6 +152,13 @@ def check_grounding(graph, *, min_terms: int = 2) -> Report:
             alt = set()
         if alt:
             aliases.setdefault(r["name"].lower(), set()).update(alt)
+
+    # Document frequency over scenes, used to discard terms too common to be evidence.
+    df: dict[str, int] = {}
+    for text in scenes.values():
+        for w in set(_WORD.findall(text)):
+            df[w] = df.get(w, 0) + 1
+    common = {w for w, n in df.items() if n > len(scenes) * common_at}
 
     claims: dict[tuple[str, str], str] = {}
     for kind, (table, idcol, main, extra) in _CLAIM_SQL.items():
@@ -174,7 +190,7 @@ def check_grounding(graph, *, min_terms: int = 2) -> Report:
             # faithful quote, so test the longest run we were actually given.
             quote_ok = nq in scene or (len(nq) > 40 and nq[:40] in scene)
 
-        terms = _terms(claim) - povs.get(sid, set())
+        terms = _terms(claim) - povs.get(sid, set()) - common
         missing = []
         for t in terms:
             if t in scene:
