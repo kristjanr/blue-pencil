@@ -1,0 +1,34 @@
+# A run policy. Everything about HOW a run behaves. Change it per run,
+# or mid-book: manual while you calibrate trust, auto_if_clean once the checkers
+# have earned it, manual again for the ending.
+gates:
+  plan:    manual                # manual | auto_if_clean | auto | {every_n: 5}
+  chapter: auto_if_clean
+  act:     manual
+
+candidates:
+  per_scene: 3
+  revision_rounds: 2
+
+context:
+  start_tokens: 30000
+  max_tokens:   50000
+
+models:
+  plan:    claude-fable-5-1
+  draft:   claude-opus-5
+  extract: claude-sonnet-5
+  checks:  claude-haiku-4-5
+
+checks:
+  epistemic:  hard
+  geography:  hard
+  objects:    hard
+  card:       hard
+  repetition: {severity: soft, budget: corpus_baseline}
+  voice:      soft
+  discriminator: floor           # a floor, never an optimisation target
+  panel:      soft
+
+budget:
+  max_usd: 400

@@ -27,7 +27,7 @@ DEFAULT_MODELS = {
     "plan": "claude-fable-5-1",
     "draft": "claude-opus-5",
     "extract": "claude-sonnet-5",
-    "checks": "claude-haiku-4-5-20251001",
+    "checks": "claude-haiku-4-5",
     "judge": "claude-sonnet-5",
     "probe": "claude-opus-5",
 }

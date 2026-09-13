@@ -20,7 +20,7 @@ models:
   plan:    claude-fable-5-1        # hardest judgment calls, smallest token count
   draft:   claude-opus-5
   extract: claude-sonnet-5         # volume work with strict schemas, run in batch
-  checks:  claude-haiku-4-5-20251001
+  checks:  claude-haiku-4-5
   judge:   claude-sonnet-5
 
 checks:

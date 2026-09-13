@@ -136,6 +136,31 @@ def _cacheable(blocks: Sequence[str]) -> list[dict]:
     return out
 
 
+#: Models that reject the sampling parameters (temperature/top_p/top_k) with a
+#: 400. Everything current except Haiku; sending temperature to one of these
+#: fails the request outright, and the value we send is the default anyway.
+_NO_SAMPLING = ("claude-fable-", "claude-mythos-", "claude-opus-", "claude-sonnet-5")
+
+
+def _accepts_sampling(model: str) -> bool:
+    return not model.startswith(_NO_SAMPLING)
+
+
+def _strict_schema(schema: dict) -> dict:
+    """Close every object in a JSON schema, which `strict` requires.
+
+    Pydantic leaves objects open; a strict tool with an open object is rejected.
+    """
+    if isinstance(schema, dict):
+        out = {k: _strict_schema(v) for k, v in schema.items()}
+        if out.get("type") == "object" and "additionalProperties" not in out:
+            out["additionalProperties"] = False
+        return out
+    if isinstance(schema, list):
+        return [_strict_schema(v) for v in schema]  # type: ignore[return-value]
+    return schema
+
+
 # ------------------------------------------------------------------ structured
 def structured(
     client,
@@ -157,7 +182,10 @@ def structured(
     tool = {
         "name": "emit",
         "description": f"Emit one {schema.__name__} record.",
-        "input_schema": schema.model_json_schema(),
+        "input_schema": _strict_schema(schema.model_json_schema()),
+        # `strict` is what keeps the arguments schema-valid now that the call is
+        # no longer forced; see the tool_choice note below.
+        "strict": True,
     }
     system_blocks = _cacheable([system] if isinstance(system, str) else list(system)) if system else []
 
@@ -166,12 +194,17 @@ def structured(
             model=model,
             max_tokens=max_tokens,
             tools=[tool],
-            tool_choice={"type": "tool", "name": "emit"},
-            messages=[{"role": "user", "content": prompt}],
+            # Forced tool use (`{"type": "tool"}` / `{"type": "any"}`) is rejected
+            # with a 400 on the newest models — including the one `plan` runs on.
+            # `auto` plus an instruction naming the tool is the supported shape.
+            tool_choice={"type": "auto"},
+            messages=[{"role": "user", "content":
+                       f"{prompt}\n\nReply by calling the `emit` tool exactly once. "
+                       f"Do not answer in prose."}],
         )
         if system_blocks:
             kwargs["system"] = system_blocks
-        if temperature is not None:
+        if temperature is not None and _accepts_sampling(model):
             kwargs["temperature"] = temperature
         return client.messages.create(**kwargs)
 
@@ -225,10 +258,16 @@ def write(
             max_tokens=max_tokens,
             system=_cacheable(system_blocks),
             messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
         )
+        if _accepts_sampling(m):
+            kwargs["temperature"] = temperature
         if thinking_effort:
-            kwargs["thinking"] = {"type": "enabled", "effort": thinking_effort}
+            # Adaptive thinking replaced the fixed-budget form; effort is its own
+            # setting under output_config, not a key inside `thinking`. The old
+            # `{"type": "enabled", ...}` shape is a 400 on every model configured
+            # here, which would have failed every drafting call.
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {"effort": thinking_effort}
             kwargs.pop("temperature", None)
         with client.messages.stream(**kwargs) as stream:
             for _ in stream.text_stream:
