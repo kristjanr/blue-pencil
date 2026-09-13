@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from .db import Graph
 from .errors import UncitedClaim
-from .llm import Usage, poll_batch, structured, submit_batch
+from .llm import Usage, _cacheable, poll_batch, schema_tokens, structured, submit_batch
 from .models import (
     Citation, Contradiction, Entity, Event, ObjectRecord, Promise, TechniqueSpec, Thread,
 )
@@ -251,23 +251,26 @@ def extract(
 
 
 def _run_batch(graph, profile, client, model, pass_name, schema, scene_rows, report, progress) -> None:
+    raw_schema = schema.model_json_schema()
     tool = {
         "name": "emit",
         "description": f"Emit {schema.__name__}.",
-        "input_schema": schema.model_json_schema(),
+        "input_schema": raw_schema,
     }
+    # Tools render before system, so a breakpoint on the system block caches the
+    # tool schema with it — and the schema is the bulk of the shared prefix here
+    # (~1,200 tokens for the events pass against ~175 of system text). Whether
+    # that clears the model's minimum depends on the pass: events and ledger do,
+    # entities and technique do not, and marking one that cannot cache would
+    # spend a breakpoint slot for nothing. Let the helper decide per pass.
+    system_blocks = _cacheable([SYSTEM], model=model, prefix_tokens=schema_tokens(raw_schema))
     requests = [
         {
             "custom_id": f"{pass_name}--{scene.scene_id}".replace(".", "_"),
             "params": {
                 "model": model,
                 "max_tokens": 12_000,
-                # No cache_control: this system block is ~175 tokens, well under
-                # every model's minimum cacheable prefix, so a breakpoint here
-                # would cache nothing and say nothing about it. The rest of each
-                # request is the scene itself, which is shared with no other
-                # request — extraction has genuinely nothing to cache.
-                "system": [{"type": "text", "text": SYSTEM}],
+                "system": system_blocks,
                 "tools": [tool],
                 "tool_choice": {"type": "tool", "name": "emit"},
                 "messages": [{"role": "user", "content": _scene_prompt(scene, profile, pass_name)}],

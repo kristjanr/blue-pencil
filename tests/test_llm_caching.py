@@ -170,27 +170,48 @@ def test_batch_halves_the_bill():
 
 
 # ─────────────────────────────────────────── nothing marked that cannot cache
-def test_extraction_sends_no_breakpoint_it_cannot_use(monkeypatch, world):
-    """Checked on the request payload, not the source: extraction's system block
-    is ~175 tokens, under every model's minimum, so marking it would cache
-    nothing and spend one of the four slots."""
+def test_the_cached_prefix_includes_what_renders_before_it():
+    """Render order is tools -> system -> messages, so a breakpoint on the last
+    system block caches the tool schema with it.
+
+    Measuring the system text alone got this wrong in exactly the place it
+    mattered: extraction's system block is ~175 tokens and its tool schema is
+    ~1,200, so counting only the text calls a working cache uncacheable.
+    """
+    short_system = [_blocks(175)]
+    assert not caches(short_system, model="claude-sonnet-5")
+    assert caches(short_system, model="claude-sonnet-5", prefix_tokens=1_200)
+
+    unaware = llm._cacheable(short_system, model="claude-sonnet-5")
+    aware = llm._cacheable(short_system, model="claude-sonnet-5", prefix_tokens=1_200)
+    assert "cache_control" not in unaware[-1]
+    assert "cache_control" in aware[-1]
+
+
+def test_extraction_marks_the_passes_whose_schema_clears_the_minimum(monkeypatch, world):
+    """Checked on the request payload. Two of the four passes have a tool schema
+    large enough to cache; the other two would spend a slot for nothing."""
     from bp import extract
-    from bp.extract import SYSTEM, ExtractReport
-    from bp.policy import RunPolicy
-    from bp.textstats import estimate_tokens
+    from bp.extract import ExtractReport
 
     graph, profile = world
-    assert estimate_tokens(SYSTEM) < min_cacheable_tokens("claude-sonnet-5")
+    model = "claude-sonnet-5"
+    marked: dict[str, bool] = {}
 
-    captured: list[list[dict]] = []
-    monkeypatch.setattr(extract, "submit_batch",
-                        lambda client, requests: captured.append(requests) or "batch_1")
-    monkeypatch.setattr(extract, "poll_batch", lambda client, batch_id: [])
+    for pass_name, schema in [("entities", extract._Entities), ("events", extract._Events),
+                              ("ledger", extract._Ledger), ("technique", extract._Mechanism)]:
+        captured: list[list[dict]] = []
+        monkeypatch.setattr(extract, "submit_batch",
+                            lambda c, requests, _c=captured: _c.append(requests) or "b")
+        monkeypatch.setattr(extract, "poll_batch", lambda c, b: [])
+        extract._run_batch(graph, profile, object(), model, pass_name, schema,
+                           graph.scenes()[:2], ExtractReport(), lambda _: None)
+        blocks = captured[0][0]["params"]["system"]
+        marked[pass_name] = any("cache_control" in b for b in blocks)
 
-    extract._run_batch(graph, profile, object(), "claude-sonnet-5", "events",
-                       extract._Events, graph.scenes()[:2], ExtractReport(), lambda _: None)
-
-    assert captured, "no batch was submitted"
-    for request in captured[0]:
-        for block in request["params"]["system"]:
-            assert "cache_control" not in block
+    assert marked["events"] and marked["ledger"], (
+        "the two large schemas clear the minimum and must carry a breakpoint"
+    )
+    assert not marked["entities"] and not marked["technique"], (
+        "a breakpoint below the minimum caches nothing and spends a slot"
+    )

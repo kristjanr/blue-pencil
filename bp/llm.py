@@ -178,7 +178,14 @@ def _text_blocks(blocks: Sequence[str]) -> list[dict]:
     return [{"type": "text", "text": t} for t in blocks if t]
 
 
-def _cacheable(blocks: Sequence[str], *, model: str, ttl: str | None = None) -> list[dict]:
+def schema_tokens(schema: dict) -> int:
+    """Rough size of a tool schema as the API will render it."""
+    return estimate_tokens(json.dumps(schema))
+
+
+def _cacheable(
+    blocks: Sequence[str], *, model: str, ttl: str | None = None, prefix_tokens: int = 0
+) -> list[dict]:
     """Render text blocks, breakpointing the last one **iff** it can cache.
 
     Two rules, both learned the hard way:
@@ -195,11 +202,19 @@ def _cacheable(blocks: Sequence[str], *, model: str, ttl: str | None = None) -> 
     cache and says nothing about it — no error, just a zero. The marker is then
     worse than useless, because a request may carry only four breakpoints and
     that one is spent.
+
+    ``prefix_tokens`` is what renders *ahead* of these blocks and therefore
+    falls inside the cached prefix too. Render order is ``tools`` -> ``system``
+    -> ``messages``, so a breakpoint on the last system block caches the tool
+    definitions with it. Extraction is the case that makes this matter: its
+    system text is ~175 tokens and its tool schema is ~1,200, so measuring the
+    text alone would call the prefix uncacheable and drop a breakpoint that is
+    in fact serving most of the request from cache.
     """
     out = _text_blocks(blocks)
     if not out:
         return out
-    total = sum(estimate_tokens(b["text"]) for b in out)
+    total = prefix_tokens + sum(estimate_tokens(b["text"]) for b in out)
     if total < min_cacheable_tokens(model):
         return out
     control: dict[str, Any] = {"type": "ephemeral"}
@@ -209,9 +224,10 @@ def _cacheable(blocks: Sequence[str], *, model: str, ttl: str | None = None) -> 
     return out
 
 
-def caches(blocks: Sequence[str], *, model: str) -> bool:
+def caches(blocks: Sequence[str], *, model: str, prefix_tokens: int = 0) -> bool:
     """Whether a breakpoint over these blocks would actually cache."""
-    return sum(estimate_tokens(b) for b in blocks if b) >= min_cacheable_tokens(model)
+    total = prefix_tokens + sum(estimate_tokens(b) for b in blocks if b)
+    return total >= min_cacheable_tokens(model)
 
 
 #: Models that reject the sampling parameters (temperature/top_p/top_k) with a
@@ -224,13 +240,26 @@ def _accepts_sampling(model: str) -> bool:
     return not model.startswith(_NO_SAMPLING)
 
 
-def _strict_schema(schema: dict) -> dict:
-    """Close every object in a JSON schema, which `strict` requires.
+#: Validation keywords a strict tool schema rejects. Pydantic emits them from
+#: ordinary field constraints — ``Field(ge=0, le=1)`` becomes minimum/maximum —
+#: so a schema that is perfectly valid JSON Schema is refused with a 400.
+_STRICT_UNSUPPORTED = frozenset({
+    "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+    "minLength", "maxLength", "pattern", "format",
+    "minItems", "maxItems", "uniqueItems",
+})
 
-    Pydantic leaves objects open; a strict tool with an open object is rejected.
+
+def _strict_schema(schema: dict) -> dict:
+    """Make a pydantic schema acceptable to a strict tool.
+
+    Two edits. Every object is closed, because a strict tool with an open
+    object is rejected. And the validation keywords strict does not support are
+    dropped — the bound is enforced by pydantic on the way back in either way,
+    so nothing is actually lost by not declaring it on the way out.
     """
     if isinstance(schema, dict):
-        out = {k: _strict_schema(v) for k, v in schema.items()}
+        out = {k: _strict_schema(v) for k, v in schema.items() if k not in _STRICT_UNSUPPORTED}
         if out.get("type") == "object" and "additionalProperties" not in out:
             out["additionalProperties"] = False
         return out
@@ -257,16 +286,31 @@ def structured(
     Chapter cards and every graph record go through this: nothing downstream
     should ever be parsing prose.
     """
-    tool = {
+    raw_schema = schema.model_json_schema()
+    # `strict` keeps the arguments schema-valid now that the call is no longer
+    # forced (see the tool_choice note below), but it caps how complex a schema
+    # may be, and the extraction records exceed that cap. It is an optimisation,
+    # not a correctness requirement — the result is validated against the model
+    # on the way back in regardless — so fall back rather than fail.
+    strict_tool = {
         "name": "emit",
         "description": f"Emit one {schema.__name__} record.",
-        "input_schema": _strict_schema(schema.model_json_schema()),
-        # `strict` is what keeps the arguments schema-valid now that the call is
-        # no longer forced; see the tool_choice note below.
+        "input_schema": _strict_schema(raw_schema),
         "strict": True,
     }
+    plain_tool = {
+        "name": "emit",
+        "description": f"Emit one {schema.__name__} record.",
+        "input_schema": raw_schema,
+    }
+    tool: dict[str, Any] = strict_tool
+    # Tools render before system, so the breakpoint on the last system block
+    # covers the tool schema as well — and here the schema is most of what
+    # there is to cache. Counting only the system text would put a 175-token
+    # block under every minimum and drop a breakpoint that is doing real work.
     system_blocks = _cacheable(
-        [system] if isinstance(system, str) else list(system), model=model
+        [system] if isinstance(system, str) else list(system),
+        model=model, prefix_tokens=schema_tokens(raw_schema),
     ) if system else []
 
     def call():
@@ -288,7 +332,17 @@ def structured(
             kwargs["temperature"] = temperature
         return client.messages.create(**kwargs)
 
-    msg = _retry(call)
+    try:
+        msg = _retry(call)
+    except Exception as exc:
+        # A schema the strict path will not accept is a property of the schema,
+        # not of this scene, so retrying it strictly is wasted. Drop to the
+        # plain tool once and let every later call in this run use it too.
+        if "schema" not in str(exc).lower():
+            raise
+        tool = plain_tool
+        msg = _retry(call)
+
     if usage is not None:
         usage.add(model, msg.usage, stage=stage)
     if getattr(msg, "stop_reason", "") == "refusal":

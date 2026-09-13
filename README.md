@@ -77,6 +77,10 @@ price instead of paying for it again; the per-chapter tail sits after it under
 top-level auto-caching. A breakpoint below the model's minimum cacheable prefix
 (512 tokens on Opus 5, 4096 on Haiku 4.5) is never sent at all — it would cache
 nothing, report nothing, and spend one of the four slots a request is allowed.
+The prefix is measured including whatever renders ahead of it: order is
+`tools` → `system` → `messages`, so extraction's ~175-token system block is
+cacheable on the passes whose tool schema is large enough to carry it, and not
+on the ones where it isn't.
 | 5 · Check — nine blue pencils | `bp/checks/` | four of nine |
 | 6 · Accept — re-extract, write deltas, git commit | `bp/accept.py` | recommended |
 | Eval — contamination probe, Tiers A/B/C, ablations | `bp/evalharness.py` | probe only |
