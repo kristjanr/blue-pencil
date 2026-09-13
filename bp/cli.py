@@ -483,6 +483,10 @@ def cmd_cost(args) -> int:
     _echo(f"  {'+ one backtest run':38} ${rows[0][1] + book_total * 2:>8,.0f}")
     _echo("\nOrder of magnitude, not a quote. The dominant cost is human attention at "
           "whatever gates the run policy leaves manual.")
+    _echo("\nThese are the plan's published unit rates, kept as written. They were derived "
+          "from per-token prices above the current ones, so treat them as a ceiling: a run's "
+          "actual spend is tallied by bp.llm.Usage against the current rate table, and comes "
+          "out lower.")
     return 0
 
 

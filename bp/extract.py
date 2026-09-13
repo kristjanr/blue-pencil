@@ -262,7 +262,12 @@ def _run_batch(graph, profile, client, model, pass_name, schema, scene_rows, rep
             "params": {
                 "model": model,
                 "max_tokens": 12_000,
-                "system": [{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
+                # No cache_control: this system block is ~175 tokens, well under
+                # every model's minimum cacheable prefix, so a breakpoint here
+                # would cache nothing and say nothing about it. The rest of each
+                # request is the scene itself, which is shared with no other
+                # request — extraction has genuinely nothing to cache.
+                "system": [{"type": "text", "text": SYSTEM}],
                 "tools": [tool],
                 "tool_choice": {"type": "tool", "name": "emit"},
                 "messages": [{"role": "user", "content": _scene_prompt(scene, profile, pass_name)}],

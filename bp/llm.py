@@ -27,19 +27,72 @@ from typing import Any, Iterable, Sequence, Type, TypeVar
 from pydantic import BaseModel
 
 from .errors import NoCredentials, Refused
+from .textstats import estimate_tokens
 
 T = TypeVar("T", bound=BaseModel)
 
-#: Approximate first-party rates, USD per million tokens (input, output).
-#: Used only for the run-budget estimate and the cost report; not a quote.
+#: First-party rates, USD per million tokens (input, output). Used for the
+#: run-budget cap and the cost report; an estimate, not a quote.
 RATES: dict[str, tuple[float, float]] = {
-    "claude-opus-5": (15.0, 75.0),
-    "claude-fable-5-1": (15.0, 75.0),
-    "claude-sonnet-5": (3.0, 15.0),
-    "claude-haiku-4-5-20251001": (1.0, 5.0),
+    "claude-fable-5-1": (10.0, 50.0),
+    "claude-fable-5": (10.0, 50.0),
+    "claude-opus-5": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-sonnet-5": (2.0, 10.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-4-5": (1.0, 5.0),
 }
-CACHE_READ_DISCOUNT = 0.1     # cached input tokens bill at roughly a tenth
+#: Rate to fall back on for a model this table does not know. Deliberately at
+#: the top of the range: an unknown model that turns out to be expensive should
+#: trip `budget.max_usd` early rather than late.
+DEFAULT_RATE = (10.0, 50.0)
+
+#: Cached input bills at a fraction of the input rate. A tenth on most models;
+#: Claude Fable 5.1 reads at $0.25/MTok, which is a fortieth of its input rate.
+CACHE_READ_DISCOUNT = 0.1
+CACHE_READ_DISCOUNT_BY_MODEL = {"claude-fable-5-1": 0.025}
+CACHE_WRITE_PREMIUM = 1.25    # 5-minute TTL; a 1-hour TTL writes at 2x
 BATCH_DISCOUNT = 0.5          # asynchronous batch work is half price
+
+#: Minimum cacheable prefix, in tokens, by model. A shorter prefix silently
+#: does not cache — no error, just `cache_creation_input_tokens: 0` — so a
+#: breakpoint below the minimum is not merely useless, it burns one of the four
+#: slots a request is allowed. The numbers are NOT monotonic across
+#: generations: 512 on the newest models, 4096 on Haiku 4.5.
+MIN_CACHEABLE_TOKENS: dict[str, int] = {
+    "claude-fable-5-1": 512,
+    "claude-fable-5": 512,
+    "claude-opus-5": 512,
+    "claude-opus-4-8": 1024,
+    "claude-sonnet-5": 1024,
+    "claude-sonnet-4-6": 1024,
+    "claude-haiku-4-5": 4096,
+}
+DEFAULT_MIN_CACHEABLE = 1024
+
+#: Most breakpoints a single request may carry.
+MAX_CACHE_BREAKPOINTS = 4
+
+
+def _base_id(model: str) -> str:
+    """Strip a trailing date snapshot, so `claude-haiku-4-5-20251001` still
+    finds its row. Current model ids carry no suffix, but one left over in a
+    config should degrade to the right rate rather than to the default."""
+    import re
+
+    return re.sub(r"-\d{8}$", "", (model or "").strip())
+
+
+def rate_for(model: str) -> tuple[float, float]:
+    return RATES.get(_base_id(model), DEFAULT_RATE)
+
+
+def cache_read_discount(model: str) -> float:
+    return CACHE_READ_DISCOUNT_BY_MODEL.get(_base_id(model), CACHE_READ_DISCOUNT)
+
+
+def min_cacheable_tokens(model: str) -> int:
+    return MIN_CACHEABLE_TOKENS.get(_base_id(model), DEFAULT_MIN_CACHEABLE)
 
 
 def make_client(api_key: str | None = None):
@@ -69,7 +122,8 @@ class Usage:
     by_stage: dict[str, float] = field(default_factory=dict)
 
     def add(self, model: str, usage: Any, *, stage: str = "", batch: bool = False) -> None:
-        rate_in, rate_out = RATES.get(model, (5.0, 25.0))
+        rate_in, rate_out = rate_for(model)
+        read_discount = cache_read_discount(model)
         n_in = int(getattr(usage, "input_tokens", 0) or 0)
         n_out = int(getattr(usage, "output_tokens", 0) or 0)
         n_cache_read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
@@ -77,8 +131,8 @@ class Usage:
 
         cost = (
             n_in * rate_in
-            + n_cache_read * rate_in * CACHE_READ_DISCOUNT
-            + n_cache_write * rate_in * 1.25
+            + n_cache_read * rate_in * read_discount
+            + n_cache_write * rate_in * CACHE_WRITE_PREMIUM
             + n_out * rate_out
         ) / 1_000_000
         if batch:
@@ -120,20 +174,44 @@ def _retry(fn, *, attempts: int = 4, base: float = 2.0):
     raise last  # type: ignore[misc]
 
 
-def _cacheable(blocks: Sequence[str]) -> list[dict]:
-    """Mark the last stable block with a cache breakpoint.
+def _text_blocks(blocks: Sequence[str]) -> list[dict]:
+    return [{"type": "text", "text": t} for t in blocks if t]
 
-    The context pack has a fixed render order for exactly this reason: engine
-    rules, bible digest and style spec do not change within a book, so they are
-    written once and read back at a tenth of the price for every scene after.
+
+def _cacheable(blocks: Sequence[str], *, model: str, ttl: str | None = None) -> list[dict]:
+    """Render text blocks, breakpointing the last one **iff** it can cache.
+
+    Two rules, both learned the hard way:
+
+    *Place the breakpoint at the end of the stable prefix, not the end of the
+    prompt.* Caching is a prefix match, and a read can only happen at a
+    breakpoint. A breakpoint sitting after per-request content gives the next
+    request nothing to read: it shares the first N tokens, but there is no read
+    point at N, so the whole prefix is reprocessed at full price. The symptom is
+    `cache_creation_input_tokens` on every request and `cache_read_input_tokens`
+    that never covers the shared part.
+
+    *Below the model's minimum, do not mark at all.* A short prefix does not
+    cache and says nothing about it — no error, just a zero. The marker is then
+    worse than useless, because a request may carry only four breakpoints and
+    that one is spent.
     """
-    out: list[dict] = []
-    for i, text in enumerate(blocks):
-        block: dict[str, Any] = {"type": "text", "text": text}
-        if i == len(blocks) - 1:
-            block["cache_control"] = {"type": "ephemeral"}
-        out.append(block)
+    out = _text_blocks(blocks)
+    if not out:
+        return out
+    total = sum(estimate_tokens(b["text"]) for b in out)
+    if total < min_cacheable_tokens(model):
+        return out
+    control: dict[str, Any] = {"type": "ephemeral"}
+    if ttl:
+        control["ttl"] = ttl
+    out[-1]["cache_control"] = control
     return out
+
+
+def caches(blocks: Sequence[str], *, model: str) -> bool:
+    """Whether a breakpoint over these blocks would actually cache."""
+    return sum(estimate_tokens(b) for b in blocks if b) >= min_cacheable_tokens(model)
 
 
 #: Models that reject the sampling parameters (temperature/top_p/top_k) with a
@@ -187,7 +265,9 @@ def structured(
         # no longer forced; see the tool_choice note below.
         "strict": True,
     }
-    system_blocks = _cacheable([system] if isinstance(system, str) else list(system)) if system else []
+    system_blocks = _cacheable(
+        [system] if isinstance(system, str) else list(system), model=model
+    ) if system else []
 
     def call():
         kwargs: dict[str, Any] = dict(
@@ -238,7 +318,8 @@ def write(
     client,
     model: str,
     *,
-    system_blocks: Sequence[str],
+    stable_blocks: Sequence[str],
+    tail_blocks: Sequence[str] = (),
     prompt: str,
     max_tokens: int = 16_000,
     usage: Usage | None = None,
@@ -247,25 +328,50 @@ def write(
     temperature: float = 1.0,
     fallback_model: str | None = None,
 ) -> str:
-    """Long prose, streamed, with the refusal path handled.
+    """Long prose, streamed, with caching placed where it pays and refusals handled.
 
-    ``system_blocks`` is the context pack in render order; the last block gets
-    the cache breakpoint.
+    The context pack arrives split in two, because the two halves have different
+    lifetimes and want different treatment:
+
+    ``stable_blocks``
+        Unchanged for the whole book — engine rules, series bible digest, POV
+        technique spec. These get the explicit breakpoint, so every later scene
+        in the book reads them back instead of paying for them again. This is
+        the half the pack's render order exists to protect.
+
+    ``tail_blocks``
+        The chapter card, the POV's knowledge state, exemplars, recent chapters,
+        the phrase ledger. Same across the candidates of one scene, different
+        next chapter. Top-level auto-caching moves a breakpoint along behind
+        these, which earns its keep across the N candidates and costs nothing
+        when it does not.
+
+    Putting the only breakpoint after the tail — the shape this had before —
+    means the stable half never gets a read point and is reprocessed at full
+    price on every scene of every chapter.
     """
+    stable = _cacheable(stable_blocks, model=model)
+    system = stable + _text_blocks(tail_blocks)
+    # Auto-caching is worth requesting only if the whole prompt clears the
+    # minimum; below it the field is a silent no-op that spends a slot.
+    auto_cache = caches(list(stable_blocks) + list(tail_blocks), model=model)
+
     def call(m: str) -> Any:
         kwargs: dict[str, Any] = dict(
             model=m,
             max_tokens=max_tokens,
-            system=_cacheable(system_blocks),
+            system=_cacheable(stable_blocks, model=m) + _text_blocks(tail_blocks),
             messages=[{"role": "user", "content": prompt}],
         )
+        if auto_cache and tail_blocks:
+            # Skipped when there is no tail: the explicit marker is then already
+            # on the last block, and a same-TTL top-level field would be a no-op.
+            kwargs["cache_control"] = {"type": "ephemeral"}
         if _accepts_sampling(m):
             kwargs["temperature"] = temperature
         if thinking_effort:
             # Adaptive thinking replaced the fixed-budget form; effort is its own
-            # setting under output_config, not a key inside `thinking`. The old
-            # `{"type": "enabled", ...}` shape is a 400 on every model configured
-            # here, which would have failed every drafting call.
+            # setting under output_config, not a key inside `thinking`.
             kwargs["thinking"] = {"type": "adaptive"}
             kwargs["output_config"] = {"effort": thinking_effort}
             kwargs.pop("temperature", None)

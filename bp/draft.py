@@ -61,7 +61,11 @@ class ContextPack:
 
     @property
     def stable(self) -> list[str]:
-        """Unchanged within a book. Cached."""
+        """Unchanged within a book, and the half that carries the breakpoint.
+
+        Everything downstream of this list is per-chapter, so this is the
+        boundary a cache read has to land on. See :func:`bp.llm.write`.
+        """
         return [b for b in (self.rules, self.bible_digest, self.style_spec) if b]
 
     @property
@@ -323,7 +327,8 @@ def draft_scene(
     for i in range(n):
         text = write(
             client, policy.model_for("draft"),
-            system_blocks=pack.system_blocks(),
+            stable_blocks=pack.stable,
+            tail_blocks=pack.per_chapter,
             prompt=pack.scene_brief,
             max_tokens=min(32_000, max(4_000, card.word_budget * 3)),
             usage=usage, stage="draft",
@@ -357,6 +362,7 @@ def revise(
         f"Change nothing the marginalia did not ask about.\n\n"
         f"--- DRAFT ---\n{text}\n\n--- MARGINALIA ---\n{notes}"
     )
-    return write(client, policy.model_for("draft"), system_blocks=pack.system_blocks(),
+    return write(client, policy.model_for("draft"),
+                 stable_blocks=pack.stable, tail_blocks=pack.per_chapter,
                  prompt=prompt, max_tokens=32_000, usage=usage, stage="draft:revise",
                  thinking_effort=policy.thinking_effort).strip()

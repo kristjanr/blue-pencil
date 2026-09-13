@@ -69,6 +69,14 @@ corpus → scenes → story graph → plan → draft → check → accept → (t
 | 2 · Extract — events, reports, beliefs, consequences, promises, threads, technique specs | `bp/extract.py` | yes (batch) |
 | 3 · Plan — ending hypotheses, book skeleton, move tournament, chapter cards | `bp/planner.py` | partly |
 | 4 · Draft — context pack assembly, N candidates, revision | `bp/draft.py` | yes |
+
+The context pack is split in two where it meets the API: the stable half —
+engine rules, bible digest, POV technique spec — carries the explicit cache
+breakpoint, so every later scene in the book reads it back at a tenth of the
+price instead of paying for it again; the per-chapter tail sits after it under
+top-level auto-caching. A breakpoint below the model's minimum cacheable prefix
+(512 tokens on Opus 5, 4096 on Haiku 4.5) is never sent at all — it would cache
+nothing, report nothing, and spend one of the four slots a request is allowed.
 | 5 · Check — nine blue pencils | `bp/checks/` | four of nine |
 | 6 · Accept — re-extract, write deltas, git commit | `bp/accept.py` | recommended |
 | Eval — contamination probe, Tiers A/B/C, ablations | `bp/evalharness.py` | probe only |
@@ -263,8 +271,10 @@ accident"*.
 - **Turning-point detection is a word-count proxy.** Good enough for Tier A shape
   comparison, not a theory of narrative structure.
 - **The model-backed stages are uncalibrated.** See "proven vs. wired" above.
-- **The plan's cost figures are estimates.** `bp cost` reproduces them from unit
-  rates; it is an order of magnitude, not a quote.
+- **`bp cost` is a ceiling, not an estimate.** It reproduces the plan's published
+  unit rates verbatim, and those were derived from per-token prices above the
+  current ones. What a run actually spends is tallied by `bp.llm.Usage` against
+  the current rate table, and comes out lower.
 
 ---
 
