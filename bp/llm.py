@@ -146,13 +146,26 @@ def _accepts_sampling(model: str) -> bool:
     return not model.startswith(_NO_SAMPLING)
 
 
-def _strict_schema(schema: dict) -> dict:
-    """Close every object in a JSON schema, which `strict` requires.
+#: Validation keywords a strict tool schema rejects. Pydantic emits them from
+#: ordinary field constraints — ``Field(ge=0, le=1)`` becomes minimum/maximum —
+#: so a schema that is perfectly valid JSON Schema is refused with a 400.
+_STRICT_UNSUPPORTED = frozenset({
+    "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+    "minLength", "maxLength", "pattern", "format",
+    "minItems", "maxItems", "uniqueItems",
+})
 
-    Pydantic leaves objects open; a strict tool with an open object is rejected.
+
+def _strict_schema(schema: dict) -> dict:
+    """Make a pydantic schema acceptable to a strict tool.
+
+    Two edits. Every object is closed, because a strict tool with an open
+    object is rejected. And the validation keywords strict does not support are
+    dropped — the bound is enforced by pydantic on the way back in either way,
+    so nothing is actually lost by not declaring it on the way out.
     """
     if isinstance(schema, dict):
-        out = {k: _strict_schema(v) for k, v in schema.items()}
+        out = {k: _strict_schema(v) for k, v in schema.items() if k not in _STRICT_UNSUPPORTED}
         if out.get("type") == "object" and "additionalProperties" not in out:
             out["additionalProperties"] = False
         return out
@@ -179,14 +192,24 @@ def structured(
     Chapter cards and every graph record go through this: nothing downstream
     should ever be parsing prose.
     """
-    tool = {
+    raw_schema = schema.model_json_schema()
+    # `strict` keeps the arguments schema-valid now that the call is no longer
+    # forced (see the tool_choice note below), but it caps how complex a schema
+    # may be, and the extraction records exceed that cap. It is an optimisation,
+    # not a correctness requirement — the result is validated against the model
+    # on the way back in regardless — so fall back rather than fail.
+    strict_tool = {
         "name": "emit",
         "description": f"Emit one {schema.__name__} record.",
-        "input_schema": _strict_schema(schema.model_json_schema()),
-        # `strict` is what keeps the arguments schema-valid now that the call is
-        # no longer forced; see the tool_choice note below.
+        "input_schema": _strict_schema(raw_schema),
         "strict": True,
     }
+    plain_tool = {
+        "name": "emit",
+        "description": f"Emit one {schema.__name__} record.",
+        "input_schema": raw_schema,
+    }
+    tool: dict[str, Any] = strict_tool
     system_blocks = _cacheable([system] if isinstance(system, str) else list(system)) if system else []
 
     def call():
@@ -208,7 +231,17 @@ def structured(
             kwargs["temperature"] = temperature
         return client.messages.create(**kwargs)
 
-    msg = _retry(call)
+    try:
+        msg = _retry(call)
+    except Exception as exc:
+        # A schema the strict path will not accept is a property of the schema,
+        # not of this scene, so retrying it strictly is wasted. Drop to the
+        # plain tool once and let every later call in this run use it too.
+        if "schema" not in str(exc).lower():
+            raise
+        tool = plain_tool
+        msg = _retry(call)
+
     if usage is not None:
         usage.add(model, msg.usage, stage=stage)
     if getattr(msg, "stop_reason", "") == "refusal":
