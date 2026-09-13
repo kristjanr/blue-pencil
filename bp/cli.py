@@ -112,6 +112,23 @@ def cmd_extract(args) -> int:
     return 2 if report.stopped else 0
 
 
+def cmd_ground(args) -> int:
+    from .grounding import check_grounding
+
+    ws = Workspace.find()
+    profile = ws.load_profile(args.profile)
+    graph = ws.open_graph(profile, db=args.db)
+    report = check_grounding(graph)
+    if args.json:
+        _echo(json.dumps([f.__dict__ | {"severity": f.severity,
+                                        "grounding": round(f.grounding, 3)}
+                          for f in report.findings], indent=2))
+    else:
+        _echo(report.render(show=args.show))
+    graph.close()
+    return 1 if (report.quote_missing or report.ungrounded) else 0
+
+
 def cmd_audit(args) -> int:
     from .extract import audit_sample
 
@@ -609,6 +626,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "(defaults to budget.max_usd). Enforced BETWEEN passes: a submitted "
                          "batch cannot be un-billed, so set a console spend cap too")
     sp.set_defaults(func=cmd_extract)
+
+    sp = sub.add_parser("ground", help="test every citation against the scene it names (no model, no cost)")
+    common(sp)
+    sp.add_argument("--show", type=int, default=25, help="how many worst findings to print")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_ground)
 
     sp = sub.add_parser("audit", help="sample cited claims for the Phase 1 spot audit")
     common(sp)

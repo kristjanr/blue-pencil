@@ -1,0 +1,202 @@
+"""Can every record prove itself against the scene it cites?
+
+The spot audit samples fifty claims and asks a human to read them. This asks
+the same question of all of them at once, deterministically, for nothing — and
+it is a better question, because a human reading a 150-character fragment on a
+phone cannot tell a bad *quote* from a bad *record*.
+
+Two checks, deliberately kept apart:
+
+**Quote fidelity** — is the stored quote actually in the scene it is attributed
+to? This is exact. A quote that is not in its own scene was invented or
+misattributed, and that is a hard defect no amount of context excuses.
+
+**Term grounding** — do the distinctive terms in the claim (proper nouns,
+numbers) appear in the cited scene? Claims are paraphrases, so ordinary wording
+will not survive; names and figures do. A claim naming three things the scene
+never mentions is not grounded in that scene, whatever it says.
+
+Neither check calls a model. Both are the kind of thing the engine should be
+doing for itself rather than buying an opinion about.
+"""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+from dataclasses import dataclass, field
+
+# Capitalised words that start sentences or are simply common; matching on these
+# would manufacture agreement rather than measure it.
+_STOP = frozenset("""
+a an the and or but if then than that this these those of in on at to for from by with
+without within into onto over under again further once here there when where why how all
+any both each few more most other some such no nor not only own same so too very can will
+just don should now he she it they them his her its their we you i me my our your as is
+was are were be been being have has had do does did doing would could may might must shall
+one two three four five six seven eight nine ten first second third last next new old
+after before during while because although though since until about against between
+""".split())
+
+_WORD = re.compile(r"[A-Za-z][A-Za-z'’\-]+")
+_PROPER = re.compile(r"\b([A-Z][a-z’'\-]{2,})")
+_NUMBER = re.compile(r"\b(\d[\d,.]*)\b")
+
+
+def _norm(s: str) -> str:
+    """Fold the typographic differences that are not real differences."""
+    s = unicodedata.normalize("NFKC", s)
+    s = (s.replace("’", "'").replace("‘", "'")
+          .replace("“", '"').replace("”", '"')
+          .replace("—", "-").replace("–", "-")
+          .replace("…", ""))
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def _terms(claim: str) -> set[str]:
+    """The parts of a claim that paraphrase does not erase."""
+    out = {re.sub(r"'s$", "", m.group(1).lower().replace("’", "'")).strip("-'")
+           for m in _PROPER.finditer(claim)}
+    out |= {m.group(1) for m in _NUMBER.finditer(claim)}
+    return {t for t in out if t not in _STOP and len(t) > 2}
+
+
+@dataclass
+class Finding:
+    kind: str
+    record_id: str
+    scene: str
+    claim: str
+    quote_ok: bool
+    missing: list[str] = field(default_factory=list)
+    found: int = 0
+    total: int = 0
+
+    @property
+    def grounding(self) -> float:
+        return self.found / self.total if self.total else 1.0
+
+    @property
+    def severity(self) -> str:
+        if not self.quote_ok:
+            return "quote not in scene"
+        return "ungrounded" if self.grounding < 0.5 else "thin"
+
+
+@dataclass
+class Report:
+    citations: int = 0
+    records: int = 0
+    quote_missing: int = 0
+    ungrounded: int = 0
+    thin: int = 0
+    no_quote: int = 0
+    findings: list[Finding] = field(default_factory=list)
+
+    def render(self, show: int = 25) -> str:
+        n = max(self.citations, 1)
+        lines = [
+            f"{self.citations:,} citations across {self.records:,} records",
+            "",
+            f"quote not found in its own scene : {self.quote_missing:,} ({self.quote_missing/n:.1%})",
+            f"claim ungrounded (<50% of terms) : {self.ungrounded:,} ({self.ungrounded/n:.1%})",
+            f"thin (50-99% of terms)           : {self.thin:,} ({self.thin/n:.1%})",
+            f"no quote stored at all           : {self.no_quote:,} ({self.no_quote/n:.1%})",
+        ]
+        hard = [f for f in self.findings if f.severity != "thin"]
+        if hard:
+            lines += ["", f"worst {min(show, len(hard))} of {len(hard)}:"]
+            for f in sorted(hard, key=lambda f: (f.quote_ok, f.grounding))[:show]:
+                lines.append(f"  [{f.severity}] {f.kind} {f.record_id} @ {f.scene}")
+                lines.append(f"      {f.claim[:100]}")
+                if f.missing:
+                    lines.append(f"      not in scene: {', '.join(sorted(f.missing)[:8])}")
+        return "\n".join(lines)
+
+
+_CLAIM_SQL = {
+    "entity":   ("entities", "entity_id",  "name",    "description"),
+    "event":    ("events",   "event_id",   "summary", None),
+    "object":   ("objects",  "object_id",  "name",    "state"),
+    "promise":  ("promises", "promise_id", "summary", None),
+    "thread":   ("threads",  "thread_id",  "name",    "state"),
+}
+
+
+def check_grounding(graph, *, min_terms: int = 2) -> Report:
+    """Test every citation against the scene it names."""
+    scenes, povs = {}, {}
+    for r in graph.conn.execute("SELECT scene_id, text, pov FROM scenes"):
+        scenes[r["scene_id"]] = _norm(r["text"])
+        # A first-person scene never names its own narrator: Bill's chapter says
+        # "I", not "Bill". Requiring the POV name to appear in its own scene
+        # manufactures a failure out of the series' own narration.
+        povs[r["scene_id"]] = {w.lower() for w in _WORD.findall(r["pov"] or "")}
+
+    # Aliases let a claim say "Riker" where the scene says "Bob-3"; without this
+    # the check would report disagreement that is only naming.
+    aliases: dict[str, set[str]] = {}
+    for r in graph.conn.execute("SELECT name, aliases FROM entities"):
+        try:
+            alt = {a.lower() for a in __import__("json").loads(r["aliases"] or "[]")}
+        except Exception:
+            alt = set()
+        if alt:
+            aliases.setdefault(r["name"].lower(), set()).update(alt)
+
+    claims: dict[tuple[str, str], str] = {}
+    for kind, (table, idcol, main, extra) in _CLAIM_SQL.items():
+        cols = f"{idcol}, {main}" + (f", {extra}" if extra else "")
+        for r in graph.conn.execute(f"SELECT {cols} FROM {table}"):
+            text = r[main] or ""
+            if extra and r[extra]:
+                text = f"{text} — {r[extra]}"
+            claims[(kind, r[idcol])] = text
+
+    report = Report()
+    seen_records = set()
+    for c in graph.conn.execute(
+            "SELECT record_kind, record_id, scene_id, quote FROM citations"):
+        kind, rid, sid, quote = c["record_kind"], c["record_id"], c["scene_id"], c["quote"] or ""
+        scene = scenes.get(sid)
+        if scene is None:
+            continue                      # dangling scene refs are a separate report
+        report.citations += 1
+        seen_records.add((kind, rid))
+        claim = claims.get((kind, rid), "")
+
+        if not quote.strip():
+            report.no_quote += 1
+            quote_ok = False
+        else:
+            nq = _norm(quote)
+            # The model often trims with an ellipsis; a prefix match is still a
+            # faithful quote, so test the longest run we were actually given.
+            quote_ok = nq in scene or (len(nq) > 40 and nq[:40] in scene)
+
+        terms = _terms(claim) - povs.get(sid, set())
+        missing = []
+        for t in terms:
+            if t in scene:
+                continue
+            if any(a in scene for a in aliases.get(t, ())):
+                continue
+            missing.append(t)
+        found, total = len(terms) - len(missing), len(terms)
+
+        if not quote_ok and quote.strip():
+            report.quote_missing += 1
+        if total >= min_terms:
+            ratio = found / total
+            if ratio < 0.5:
+                report.ungrounded += 1
+            elif ratio < 1.0:
+                report.thin += 1
+
+        if (not quote_ok and quote.strip()) or (total >= min_terms and found / total < 0.5):
+            report.findings.append(Finding(
+                kind=kind, record_id=rid, scene=sid, claim=claim,
+                quote_ok=quote_ok, missing=missing, found=found, total=total))
+
+    report.records = len(seen_records)
+    return report
