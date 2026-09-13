@@ -113,7 +113,7 @@ parecord --device=monitor_mic.monitor --rate=48000 --channels=2 --file-format=fl
 ```
 
 Started by a **second agent session** on the same machine (Kris was connected to
-two). At last check: **6h26m captured, 728 MB, still running**, wrapped in
+two). At last check (18:42): **6h42m captured, 725 MB, still running**, wrapped in
 `systemd-inhibit --what=idle:sleep:handle-lid-switch` so sleep cannot kill it.
 
 This is the **1.0x-speed** take. The first recording was played at 1.3×, and the
@@ -141,7 +141,7 @@ zero events recalled, and it declined to invent rather than guess. Saved at
 
 **Book 6 is uncontaminated. The backtest is valid.**
 
-### Eight commits, all pushed
+### Ten commits, all pushed
 
 | Commit | What it fixes |
 |---|---|
@@ -152,6 +152,8 @@ zero events recalled, and it declined to invent rather than guess. Saved at
 | `d11b85c` `69fa0b1` | The contamination probe was inverting its own verdict, and its test agreed with the bug |
 | `f547fe5` | Scene breaks printed as ornaments rather than typed — 212 of them, invisible |
 | `f2d3204` | Strict-schema fallback; extraction works |
+| `627ccb8` | *(other session)* Cache breakpoint moved to the end of the stable prefix; rate table corrected; breakpoints below a model's minimum no longer sent |
+| `9b70a01` | *(other session)* Tool schema counted inside the cached prefix |
 
 Measured effect on the corpus:
 
@@ -188,9 +190,14 @@ check a fix is free and takes seconds.
 rejected, and it marked a character mentioned only in passing as `unknown`
 rather than asserting. Caching works (81% of input served from cache).
 
-- **Cost**: measured **$0.040/scene** for one pass → ~$134 for 836 scenes × 4
-  passes, **~$67 with `--batch`**, against the **$10** `bp cost` predicts.
-  `bp cost` is a formula, not a measurement; trust the measurement.
+- **Cost**: measured **$0.026/scene** for one pass → ~$86 for 836 scenes × 4
+  passes, **~$43 with `--batch`**.
+  *Corrected 2026-09-13 after merging the other session's work:* the figure
+  first reported here was **$0.040/scene / ~$67 batched**, computed by
+  `Usage.add()` from a rate table that overstated every model except Haiku —
+  Sonnet 5 billed at $3/$15 against a real $2/$10. Same tokens, 1.5× the price.
+  Re-derived from the recorded token counts at the corrected rates.
+  `bp cost` is now documented as a **ceiling, not an estimate**.
 - **Speed**: ~**40 s/scene** synchronously → ~37 hours for the full corpus.
   **`--batch` is mandatory, not merely cheaper** — it parallelises as well as
   halving the price.
@@ -269,7 +276,8 @@ Two lessons from the Linux transcription that must carry over:
 - `./bp-run <cmd>` fetches the key at launch and passes it to that one process.
 - Gate commits on a green test run. A commit was pushed red once by chaining
   `git commit` after `pytest` without checking the exit code.
-- 94 tests, offline, ~2 s. Everything deterministic runs with no API key.
+- **113 tests**, offline, ~2 s (94 from this session's work + 19 caching tests
+  from the other). Everything deterministic runs with no API key.
 - Kris vibe-coded this repo with an AI agent and **has not read the code**.
   Decide code-level questions rather than offering him a choice between
   implementation behaviours he has no basis to evaluate; tell him the
