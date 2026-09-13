@@ -1,0 +1,3 @@
+from,to,days
+# One row per pair of named places. Symmetric; you only need each pair once.
+# Column is `days` for a travel_table profile, `light_years` for interstellar.

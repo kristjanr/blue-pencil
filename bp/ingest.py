@@ -151,37 +151,53 @@ def read_epub(path: Path) -> list[tuple[str, str]]:
         # measured style layer depends on.
         for br in soup.find_all("br"):
             br.replace_with("\n")
-        # <li> is included because books whose chapter head is a numbered list
-        # item put the entire byline there: "Bob – June 25, 2133".
+        # <li> is included because some books mark the chapter head as a list
+        # item — sometimes carrying the whole byline ("Bob – June 25, 2133"),
+        # sometimes just a title ("Face-Off") with the number in a value=
+        # attribute that never reaches the text.
         found = soup.find_all(["p", "h1", "h2", "h3", "li"]) or soup.find_all("div")
         blocks: list[str] = []
+        tags: list[str] = []
         for b in found:
             block = re.sub(r"[ \t]+", " ", b.get_text("", strip=False)).strip()
             if block:
                 blocks.append(block)
+                tags.append(b.name)
         if not blocks:
             blocks = [t for t in (soup.get_text("\n", strip=True),) if t]
+            tags = [""]
 
         heading = soup.find(["h1", "h2", "h3"])
         title = ""
         if heading:
             title = re.sub(r"\s+", " ", heading.get_text(" ", strip=True))
         head_at = -1
-        for i, block in enumerate(blocks[:4]):
-            if _CHAPTER_HEAD_TEXT.match(block):
-                head_at = i
-                if not title:
-                    title = re.sub(r"\s+", " ", block)
-                break
+        if tags and tags[0] == "li":
+            # A leading list item is the chapter head whatever it says: prose
+            # does not arrive in <li>, and contents pages are skipped as front
+            # matter before this point.
+            head_at = 0
+            if not title:
+                title = blocks[0]
+        else:
+            for i, block in enumerate(blocks[:4]):
+                if _CHAPTER_HEAD_TEXT.match(block):
+                    head_at = i
+                    if not title:
+                        title = re.sub(r"\s+", " ", block)
+                    break
 
         body = blocks
         byline: list[str] = []
-        if head_at >= 0:
+        if head_at >= 0 and _DASH_BYLINE.match(blocks[head_at]):
+            # The head line carries the byline itself, dash separated —
+            # "Bob – June 25, 2133".
+            byline = [p.strip() for p in re.split(r"\s*[–—]\s*|\s+-\s+", blocks[head_at]) if p.strip()]
+            body = blocks[head_at + 1:]
+        elif head_at >= 0:
             byline, used = split_byline(blocks[head_at + 1:])
             body = blocks[head_at + 1 + used:]
         elif blocks and _DASH_BYLINE.match(blocks[0]):
-            # The other shape: head and byline on one line, dash separated —
-            # "Bob – June 25, 2133". The line is the title as well.
             title = title or blocks[0]
             byline = [p.strip() for p in re.split(r"\s*[–—]\s*|\s+-\s+", blocks[0]) if p.strip()]
             body = blocks[1:]
@@ -190,9 +206,21 @@ def read_epub(path: Path) -> list[tuple[str, str]]:
             # Normalise to the POV/date header the text reader already
             # understands, so detect_pov and detect_date need no epub-specific
             # special case.
-            dated = [ln for ln in byline if _DATE_LINE.match(ln)]
-            rest = [ln for ln in byline if ln not in dated]
-            body = ([f"POV: {rest[0]}"] if rest else []) + dated + rest[1:] + body
+            #
+            # Which line is the narrator is decided by position, not shape: in
+            # every one of these books the narrator sits immediately above the
+            # date, with the chapter title (where it shares the block) above
+            # that and the place below. Shape cannot tell them apart — "Face-Off"
+            # and "Bob" are both short standalone lines, and picking the first
+            # one made chapter titles into POVs.
+            date_at = next((i for i, ln in enumerate(byline) if _DATE_LINE.match(ln)), -1)
+            if date_at > 0:
+                if not title and date_at > 1:
+                    title = byline[0]
+                byline = [f"POV: {byline[date_at - 1]}"] + byline[date_at:]
+            elif date_at < 0:
+                byline = [f"POV: {byline[0]}"] + byline[1:]
+            body = byline + body
 
         text = "\n\n".join(body)
         if not text.strip():
@@ -255,7 +283,8 @@ def split_scenes(body: str, *, max_words: int = 2500) -> list[str]:
     return [o for o in out if o.strip()]
 
 
-def detect_pov(text: str, header: str, profile: SeriesProfile, known: list[str]) -> str:
+def detect_pov(text: str, header: str, profile: SeriesProfile, known: list[str],
+               header_names: frozenset[str] = frozenset()) -> str:
     """POV from the header if the profile says that is where it lives, else from
     the text. Returns '' rather than guessing badly."""
     if (m := _POV_LINE.search(text[:400])):
@@ -263,11 +292,18 @@ def detect_pov(text: str, header: str, profile: SeriesProfile, known: list[str])
     if profile.pov_from == "chapter_header" and header:
         stripped = re.sub(r"^\s*(?:chapter|ch\.?)\s+[0-9ivxlcdm]+\b[:.\s]*", "", header, flags=re.I).strip()
         cand = profile.canonical(stripped)
-        if stripped and (cand in known or stripped in known):
+        # Only a head that recurs across the corpus. The harvested-name list is
+        # not a safe test here: it contains common nouns that get capitalised at
+        # the start of a sentence, so "Life", "Death" and "Project" all read as
+        # narrators on the strength of one chapter title each.
+        if stripped and (cand in header_names or stripped in header_names):
             return cand
-        looks_like_a_file = "/" in stripped or re.search(r"\.\w{2,5}$", stripped)
-        if stripped and not looks_like_a_file and len(stripped.split()) <= 2 and stripped[:1].isupper():
-            return cand
+        # No shape test here on purpose. A chapter head is just as likely to be
+        # a title as a name — "Armageddon", "Cities Victorious" and "Bob" are
+        # indistinguishable by length and capitalisation — and accepting the
+        # header on shape alone turned 44 chapter titles into POVs, each one
+        # then carrying its own style baseline and repetition budget. If the
+        # header is not a name we already know, abstaining is the honest answer.
     if profile.narration_mode.startswith("first_person"):
         # First-person text rarely names its narrator; the header usually does.
         # If it didn't, the most-mentioned known name is a poor guess, so abstain.
@@ -347,6 +383,21 @@ def ingest(
     known = harvest_names([t for _, docs in raw_books for _, t in docs])
     known = [profile.canonical(n) for n in known]
 
+    # A chapter head that recurs across the corpus is a narrator; one that
+    # appears once is a title. That single distinction is what separates "Bob",
+    # which heads dozens of chapters, from "Armageddon", which heads one — with
+    # no per-series name list, and without accepting a head on shape alone.
+    head_counts: dict[str, int] = {}
+    for _, docs in raw_books:
+        for doc_title, _ in docs:
+            head = re.sub(r"^\s*(?:chapter|ch\.?)\s+[0-9ivxlcdm]+\b[:.\s]*", "",
+                          doc_title, flags=re.I).strip()
+            if head and len(head.split()) <= 4:
+                head_counts[head] = head_counts.get(head, 0) + 1
+    header_names = frozenset(
+        profile.canonical(h) for h, c in head_counts.items() if c >= 2
+    ) | frozenset(h for h, c in head_counts.items() if c >= 2)
+
     ordinal = 0
     per_pov: dict[str, list[str]] = {}
     for book_index, (book_title, docs) in enumerate(raw_books, start=1):
@@ -358,10 +409,10 @@ def ingest(
         for chapter_index, (title, body) in enumerate(docs, start=1):
             report.chapters += 1
             pieces = split_scenes(body, max_words=max_scene_words)
-            chapter_pov = detect_pov(body, title, profile, known)
+            chapter_pov = detect_pov(body, title, profile, known, header_names)
             chapter_date = detect_date(body)
             for scene_index, text in enumerate(pieces, start=1):
-                pov = detect_pov(text, title, profile, known) or chapter_pov
+                pov = detect_pov(text, title, profile, known, header_names) or chapter_pov
                 date_text = detect_date(text) or chapter_date
                 span = None
                 if date_text:

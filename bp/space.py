@@ -65,6 +65,17 @@ class SpaceModel:
     #: places seen in the distance file, for alias/typo diagnostics
     places: set[str] = field(default_factory=set)
     default_travel_speed: float = 0.0
+    #: canonical place -> (x, y, z) in light-years. A pairwise file needs N^2
+    #: rows, and a real series names dozens of places; catalogue coordinates
+    #: give every separation from N rows.
+    coords: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    #: surface name (casefolded) -> canonical place. A planet resolves to the
+    #: system holding it: nothing travels between Vulcan and 40 Eridani.
+    place_aliases: dict[str, str] = field(default_factory=dict)
+    #: places that are not physical — VR, a council session, "the wormhole
+    #: network". A character who was in VR did not travel, so how far they went
+    #: is the wrong question rather than an unanswered one.
+    nonphysical: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------- construction
     @classmethod
@@ -76,6 +87,8 @@ class SpaceModel:
         path = spec.get("distances")
         if path:
             sm._load_pairs(Path(base or ".") / path)
+        if (places_path := spec.get("places")):
+            sm._load_places(Path(base or ".") / places_path)
         if (speed := spec.get("travel_speed")) is not None:
             sm.default_travel_speed = parse_speed(speed)
         elif model == "interstellar":
@@ -107,6 +120,52 @@ class SpaceModel:
                 self.pairs[self._key(a, b)] = value
                 self.places.update((a, b))
 
+    def _load_places(self, path: Path) -> None:
+        """A catalogue: name, sky position, distance — plus aliases and the
+        places that are not physical at all.
+
+        Columns: name, ra_hours, dec_degrees, distance_ly, alias_of, kind.
+        A row with ``alias_of`` is a surface name for another place; a row with
+        ``kind: virtual`` is somewhere nothing has to travel to.
+        """
+        import math
+
+        if not path.exists():
+            raise ProfileError(f"places file not found: {path}")
+        with path.open(newline="", encoding="utf-8") as fh:
+            for line_no, row in enumerate(csv.DictReader(fh), start=2):
+                name = (row.get("name") or "").strip()
+                if not name or name.startswith("#"):
+                    continue
+                self.places.add(name)
+                if (alias_of := (row.get("alias_of") or "").strip()):
+                    self.place_aliases[name.casefold()] = alias_of
+                    continue
+                if (row.get("kind") or "").strip().casefold() == "virtual":
+                    self.nonphysical.add(name.casefold())
+                    continue
+                ra, dec, dist = (row.get(k) or "" for k in ("ra_hours", "dec_degrees", "distance_ly"))
+                if not str(dist).strip():
+                    continue  # named, but not catalogued: pairs may still cover it
+                try:
+                    ra_h, dec_d, d_ly = float(ra or 0), float(dec or 0), float(dist)
+                except ValueError:
+                    raise ProfileError(f"{path}:{line_no}: {name} has non-numeric coordinates") from None
+                ra_rad, dec_rad = math.radians(ra_h * 15.0), math.radians(dec_d)
+                self.coords[name.casefold()] = (
+                    d_ly * math.cos(dec_rad) * math.cos(ra_rad),
+                    d_ly * math.cos(dec_rad) * math.sin(ra_rad),
+                    d_ly * math.sin(dec_rad),
+                )
+
+    def resolve(self, name: str) -> str:
+        """Surface name -> the place the arithmetic is done on."""
+        key = (name or "").strip().casefold()
+        return self.place_aliases.get(key, name).strip()
+
+    def is_nonphysical(self, name: str) -> bool:
+        return self.resolve(name).casefold() in self.nonphysical
+
     @staticmethod
     def _key(a: str, b: str) -> tuple[str, str]:
         return tuple(sorted((a.strip().casefold(), b.strip().casefold())))  # type: ignore[return-value]
@@ -117,18 +176,32 @@ class SpaceModel:
             return True
         if not a or not b:
             return False
-        return a.strip().casefold() == b.strip().casefold() or self._key(a, b) in self.pairs
+        if self.is_nonphysical(a) or self.is_nonphysical(b):
+            return True
+        a, b = self.resolve(a), self.resolve(b)
+        if a.casefold() == b.casefold() or self._key(a, b) in self.pairs:
+            return True
+        return a.casefold() in self.coords and b.casefold() in self.coords
 
     def separation(self, a: str, b: str) -> float:
         """Light-years (interstellar) or days (travel_table) between two places."""
         if self.model in {"single_city", "none"}:
             return 0.0
-        if a.strip().casefold() == b.strip().casefold():
+        # Nothing crosses space to reach VR. Treating it as an unknown distance
+        # would make the checker abstain on a quarter of this series' scenes.
+        if self.is_nonphysical(a) or self.is_nonphysical(b):
             return 0.0
-        try:
-            return self.pairs[self._key(a, b)]
-        except KeyError:
-            raise UnknownDistance(f"no distance recorded between {a!r} and {b!r}") from None
+        a, b = self.resolve(a), self.resolve(b)
+        if a.casefold() == b.casefold():
+            return 0.0
+        # An explicit pair wins: it is a deliberate assertion about a place the
+        # catalogue does not have coordinates for.
+        if (pair := self._key(a, b)) in self.pairs:
+            return self.pairs[pair]
+        pa, pb = self.coords.get(a.casefold()), self.coords.get(b.casefold())
+        if pa is not None and pb is not None:
+            return sum((x - y) ** 2 for x, y in zip(pa, pb)) ** 0.5
+        raise UnknownDistance(f"no distance recorded between {a!r} and {b!r}")
 
     def signal_days(self, a: str, b: str, speed_ly_per_day: float, *, table_factor: float = 1.0) -> float:
         """Days for a message on a channel of this speed to cross from a to b.

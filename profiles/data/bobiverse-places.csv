@@ -1,0 +1,75 @@
+name,ra_hours,dec_degrees,distance_ly,alias_of,kind,source
+# Every place named in a chapter byline across books 1-5.
+#
+# Three kinds of row:
+#   coordinates  a real star, positioned from catalogue RA/Dec/distance. Every
+#                separation between two of these is computed, so N rows give
+#                N*(N-1)/2 distances instead of a hand-maintained pair list.
+#   alias_of     a surface name for somewhere already listed. A planet resolves
+#                to its system: nothing travels between Vulcan and 40 Eridani.
+#   kind=virtual not a physical place. VR, a council session, "the wormhole
+#                network" — a character there did not travel.
+#
+# `source` records provenance, because the two must not be confused: `catalogue`
+# is real astrometry (approximate, good to a few percent — these checks ask
+# "twelve years or none", not arcseconds); `series` is asserted by the books and
+# should be corrected by anyone who knows them better. Distances marked
+# `series?` are the ones to check first.
+#
+# --- real stars, from catalogue ------------------------------------------
+Sol,0,0,0,,system,catalogue
+Alpha Centauri,14.66,-60.83,4.37,,system,catalogue
+Epsilon Eridani,3.55,-9.46,10.5,,system,catalogue
+Epsilon Indi,22.06,-56.79,11.9,,system,catalogue
+Tau Ceti,1.73,-15.94,11.9,,system,catalogue
+Omicron2 Eridani,4.25,-7.65,16.3,,system,catalogue
+82 Eridani,3.33,-43.07,19.7,,system,catalogue
+Delta Pavonis,20.14,-66.18,19.9,,system,catalogue
+Beta Hydri,0.43,-77.25,24.3,,system,catalogue
+Gliese 54,1.17,-67.60,25.6,,system,catalogue
+Gliese 877,22.90,-75.30,28.5,,system,catalogue
+Delta Eridani,3.72,-9.76,29.5,,system,catalogue
+Gamma Pavonis,21.44,-65.37,30.2,,system,catalogue
+Eta Leporis,5.94,-14.17,49.1,,system,catalogue
+#
+# --- in-universe systems, positioned by assertion ------------------------
+# No catalogue entry exists for these; the distance is what the pair file
+# already asserted or what the books state. Coordinates are a placement
+# consistent with that distance, not an observation.
+Poseidon,6.00,-30.00,15.0,,system,series?
+Quin,18.00,-40.00,32.0,,system,series?
+#
+# --- places that resolve to a system -------------------------------------
+Vulcan,,,,Omicron2 Eridani,planet,series
+Romulus,,,,Epsilon Eridani,planet,series
+Ragnarok,,,,Epsilon Eridani,place,series
+Ragnarök,,,,Epsilon Eridani,place,series
+Odin,,,,Epsilon Eridani,place,series?
+Valhalla,,,,Epsilon Eridani,place,series?
+New Pav,,,,Delta Pavonis,planet,series
+Pav,,,,Delta Pavonis,planet,series
+Omicron 2 Eridani,,,,Omicron2 Eridani,system,spelling
+Omicron² Eridani,,,,Omicron2 Eridani,system,spelling
+40 Eridani,,,,Omicron2 Eridani,system,catalogue
+Rana,,,,Delta Eridani,system,catalogue
+# Heaven's River is the megastructure at Eta Leporis; its interior locations
+# are inside it, so they resolve to the same system.
+Heaven's River,,,,Eta Leporis,megastructure,series
+Heaven’s River,,,,Eta Leporis,megastructure,series
+Three Lagoons,,,,Eta Leporis,place,series?
+Garack's Spine,,,,Eta Leporis,place,series?
+Garack’s Spine,,,,Eta Leporis,place,series?
+Misty Falls,,,,Eta Leporis,place,series?
+Arcadia River System,,,,Eta Leporis,place,series?
+Nirvana River System,,,,Eta Leporis,place,series?
+"Outskirts, Eta Leporis",,,,Eta Leporis,place,series
+#
+# --- not physical --------------------------------------------------------
+Virt,,,,,virtual,series
+In Virt,,,,,virtual,series
+VR,,,,,virtual,series
+Wormhole network,,,,,virtual,series
+Wormhole Network,,,,,virtual,series
+UFS Council Session,,,,,virtual,series
+Interstellar Space,,,,,virtual,series
+Interstellar space,,,,,virtual,series

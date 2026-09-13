@@ -1,0 +1,30 @@
+# A series profile. Everything true about the SERIES lives here;
+# the engine itself knows nothing about any particular series.
+name: example
+
+narration:
+  mode: third_close_rotating     # first_person_rotating | third_close_rotating | frame | ...
+  pov_from: chapter_header
+
+time:
+  calendar: gregorian            # gregorian | year_label | elapsed
+  # epoch_label: AC              # for year_label calendars ("297 AC")
+
+space:
+  model: travel_table            # interstellar | travel_table | single_city | none
+  distances: data/distances.csv  # from,to,days   (or from,to,light_years)
+
+information:
+  # This block is the reason the profile exists: it turns "could this character
+  # know that yet?" into arithmetic instead of a judgment call.
+  channels:
+    - {name: rider, speed: 0.02 ly/day}
+    - {name: raven, speed: 0.05 ly/day}
+
+entities:
+  aliases: data/aliases.yaml
+  clone_lineage: false
+  revivable: false
+
+style:
+  units: chapter

@@ -14,6 +14,7 @@ time:
 space:
   model: interstellar
   distances: data/bobiverse-systems.csv
+  places: data/bobiverse-places.csv
   travel_speed: 0.5c               # what a von Neumann probe manages under drive
 
 information:
