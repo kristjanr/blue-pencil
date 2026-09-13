@@ -48,6 +48,31 @@ class EpistemicCheck:
                 fixes=["add an information.channels block to the profile"],
             )]
 
+        # A channel whose availability never resolved counts as available
+        # everywhere (Channel.available_at). That is the right default for a
+        # profile that never said — but when the profile *did* say and the
+        # corpus could not supply the date, an instant channel switches on for
+        # the whole series and answers every information-path question "yes".
+        # The check would then pass everything and report green. Refuse instead:
+        # a silent pass is worse than no check at all, because green is trusted.
+        unresolved = [c for c in ctx.profile.channels
+                      if c.available_from_book and c.available_from_date is None]
+        if unresolved:
+            named = ", ".join(f"{c.name} (from {c.available_from_book!r})" for c in unresolved)
+            return [Marginalium(
+                check=self.name, severity="hard", scene_ref=ctx.draft.ref,
+                message=(
+                    f"channel {named} never resolved to a date, so it would count as available for "
+                    "the whole series and pass every information-path question. Standing down rather "
+                    "than reporting a green this check cannot support."
+                ),
+                fixes=[
+                    "run `bp ingest` — availability resolves from the first dated scene of the named book",
+                    "run `bp profile --check` to see what each channel resolved to",
+                    "or set an explicit `available_from_date` on the channel in the profile",
+                ],
+            )]
+
         # Who is on the page *as an agent*. A character who is merely talked
         # about cannot violate anything by being talked about; folding them in
         # produced three findings per error, which is how a margin becomes
