@@ -90,6 +90,7 @@ class ExtractReport:
     threads: int = 0
     contradictions: int = 0
     rejected_uncited: int = 0
+    citations_repinned: int = 0
     errors: list[str] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
     passes_done: list[str] = field(default_factory=list)
@@ -103,6 +104,7 @@ class ExtractReport:
             f"objects {self.objects} · promises {self.promises} · threads {self.threads}",
             f"contradictions kept open: {self.contradictions}",
             f"records rejected for having no citation: {self.rejected_uncited}",
+            f"citations re-pinned to the scene they came from: {self.citations_repinned}",
             self.usage.render(),
         ]
         if self.stopped:
@@ -159,6 +161,15 @@ def _write_records(graph: Graph, scene_id: str, pass_name: str, payload: Any, re
     """Commit a pass's output, dropping anything that cannot cite itself."""
 
     def cited(rec) -> bool:
+        # Each request carries exactly one scene, so every citation it returns
+        # refers to that scene and nothing else. The model does not always echo
+        # the ID verbatim, though — it normalises `book 5.35.1` to `book5.35.1`
+        # or `B5.35.1` — and a citation pointing at an ID no scene has is a
+        # dangling reference the audit cannot follow. Pin it to the scene we sent.
+        for c in rec.citations:
+            if c.scene != scene_id:
+                c.scene = scene_id
+                report.citations_repinned += 1
         if not rec.citations:
             # Extraction was told to cite. If it didn't, we know the scene, so
             # backfill the scene ID with an empty quote rather than lose the

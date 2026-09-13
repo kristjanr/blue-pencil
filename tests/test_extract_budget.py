@@ -108,3 +108,24 @@ def test_custom_ids_are_wire_legal_and_unique(world):
     assert len(set(slugs)) == len(slugs)
     # The real corpus shape, which is what broke the first submit.
     assert _custom_id("entities", "book 1.01.1") == "entities--book_1_01_1"
+
+
+def test_citations_are_pinned_to_the_scene_that_was_sent(world):
+    """One scene per request, so a re-formatted scene ID is still that scene."""
+    from bp.extract import ExtractReport, _write_records
+    from bp.models import Citation, Entity
+
+    graph, _ = world
+    scene_id = graph.scenes()[0].scene_id
+    payload = type("P", (), {"items": [
+        Entity(entity_id="E-pin", name="Pinned", kind="character",
+               citations=[Citation(scene="B9.99.9", quote="x")]),
+    ]})()
+    report = ExtractReport()
+    _write_records(graph, scene_id, "entities", payload, report)
+    graph.commit()
+
+    assert report.citations_repinned == 1
+    rows = graph.conn.execute(
+        "SELECT scene_id FROM citations WHERE record_id=?", ("E-pin",)).fetchall()
+    assert rows and all(r[0] == scene_id for r in rows), "no dangling scene reference"
