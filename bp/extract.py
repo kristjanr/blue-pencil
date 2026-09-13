@@ -93,6 +93,7 @@ class ExtractReport:
     citations_repinned: int = 0
     fields_dropped: int = 0
     records_salvaged: int = 0
+    unwrapped_json: int = 0
     errors: list[str] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
     passes_done: list[str] = field(default_factory=list)
@@ -108,7 +109,8 @@ class ExtractReport:
             f"records rejected for having no citation: {self.rejected_uncited}",
             f"citations re-pinned to the scene they came from: {self.citations_repinned}",
             f"salvaged: {self.fields_dropped} unknown fields dropped, "
-            f"{self.records_salvaged} records with an out-of-vocabulary value",
+            f"{self.records_salvaged} records with an out-of-vocabulary value, "
+            f"{self.unwrapped_json} string-wrapped arrays parsed",
             self.usage.render(),
         ]
         if self.stopped:
@@ -371,7 +373,17 @@ def _salvage(schema, data, report: "ExtractReport", where: str):
                 parent = _walk(data, loc)
                 if parent is None:
                     continue
-                if kind == "extra_forbidden":
+                if kind in ("list_type", "dict_type") and isinstance(err.get("input"), str):
+                    # The tool call arrived with its array serialised as a string
+                    # rather than as JSON. The records are all there; they are one
+                    # json.loads away from being usable.
+                    try:
+                        parent[loc[-1]] = json.loads(err["input"])
+                    except (ValueError, KeyError, IndexError, TypeError):
+                        continue
+                    report.unwrapped_json += 1
+                    progressed = True
+                elif kind == "extra_forbidden":
                     try:
                         del parent[loc[-1]]
                     except (KeyError, IndexError, TypeError):

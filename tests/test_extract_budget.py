@@ -176,3 +176,17 @@ def test_salvage_still_raises_on_damage_it_cannot_repair():
 
     with pytest.raises(ValidationError):
         _salvage(_Entities, {"items": "not a list"}, ExtractReport(), "x/entities")
+
+
+def test_a_string_wrapped_array_is_parsed_not_lost():
+    """The tool call sometimes serialises `items` as a string. Records are intact."""
+    import json as _json
+
+    from bp.extract import ExtractReport, _Entities, _salvage
+
+    report = ExtractReport()
+    items = [{"entity_id": "E1", "name": "Wrapped", "kind": "character",
+              "citations": [{"scene": "book 1.01.1", "quote": "q"}]}]
+    out = _salvage(_Entities, {"items": _json.dumps(items)}, report, "book 1.01.1/entities")
+    assert [e.entity_id for e in out.items] == ["E1"]
+    assert report.unwrapped_json == 1
