@@ -18,6 +18,7 @@ pipeline that silently picks a winner has thrown away the evidence.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
@@ -319,6 +320,18 @@ def extract(
     return report
 
 
+def _custom_id(pass_name: str, scene_id: str) -> str:
+    """A batch ``custom_id`` the API will accept: ``[a-zA-Z0-9_-]`` only, ≤64 chars.
+
+    Scene IDs carry a space (``book 1.01.1``) because the profile addresses books
+    by that exact string — ``available_from: "book 2"`` has to resolve — so the
+    shape that suits the graph is not the shape the wire allows. Squash anything
+    outside the allowed set rather than changing the scene ID.
+    """
+    slug = re.sub(r"[^a-zA-Z0-9_-]", "_", f"{pass_name}--{scene_id}")
+    return slug[:64]
+
+
 def _run_batch(graph, profile, client, model, pass_name, schema, scene_rows, report, progress) -> None:
     raw_schema = schema.model_json_schema()
     tool = {
@@ -335,7 +348,7 @@ def _run_batch(graph, profile, client, model, pass_name, schema, scene_rows, rep
     system_blocks = _cacheable([SYSTEM], model=model, prefix_tokens=schema_tokens(raw_schema))
     requests = [
         {
-            "custom_id": f"{pass_name}--{scene.scene_id}".replace(".", "_"),
+            "custom_id": _custom_id(pass_name, scene.scene_id),
             "params": {
                 "model": model,
                 "max_tokens": 12_000,
@@ -348,6 +361,10 @@ def _run_batch(graph, profile, client, model, pass_name, schema, scene_rows, rep
         for scene in scene_rows
     ]
     by_id = {r["custom_id"]: s for r, s in zip(requests, scene_rows)}
+    if len(by_id) != len(requests):
+        # Two scene IDs squashed to the same custom_id; results would be filed
+        # against the wrong scene. Refuse rather than corrupt the graph.
+        raise ValueError(f"{len(requests) - len(by_id)} scene IDs collide as batch custom_ids")
     batch_id = submit_batch(client, requests)
     progress(f"  batch {batch_id} submitted; polling")
     for result in poll_batch(client, batch_id):

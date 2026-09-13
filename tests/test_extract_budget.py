@@ -92,3 +92,19 @@ def test_every_pass_can_be_priced(world):
         usd = _estimate_pass_usd(_Counter(), "claude-sonnet-5", profile, name,
                                  _schema_for(name), graph.scenes(), batch=True)
         assert usd > 0, f"pass {name} priced at zero"
+
+
+def test_custom_ids_are_wire_legal_and_unique(world):
+    """The Batch API allows [a-zA-Z0-9_-] only; scene IDs carry a space."""
+    import re
+
+    from bp.extract import _custom_id
+
+    graph, _ = world
+    ids = [s.scene_id for s in graph.scenes()]
+    assert ids
+    slugs = [_custom_id("entities", i) for i in ids]
+    assert all(re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", s) for s in slugs)
+    assert len(set(slugs)) == len(slugs)
+    # The real corpus shape, which is what broke the first submit.
+    assert _custom_id("entities", "book 1.01.1") == "entities--book_1_01_1"
