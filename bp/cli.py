@@ -103,12 +103,13 @@ def cmd_extract(args) -> int:
     scenes = graph.scenes()
     if args.limit:
         scenes = scenes[: args.limit]
+    cap = args.max_usd if args.max_usd is not None else policy.max_usd
     report = extract(graph, profile, policy, client, scenes=scenes,
                      use_batch=args.batch, passes=args.passes or None or ("entities", "events", "ledger", "technique"),
-                     progress=_echo)
+                     max_usd=cap, progress=_echo)
     _echo(report.render())
     graph.close()
-    return 0
+    return 2 if report.stopped else 0
 
 
 def cmd_audit(args) -> int:
@@ -603,6 +604,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-batch", dest="batch", action="store_false")
     sp.add_argument("--limit", type=int, default=0, help="only the first N scenes")
     sp.add_argument("--passes", nargs="*", default=None)
+    sp.add_argument("--max-usd", type=float, default=None, dest="max_usd",
+                    help="stop before a pass whose estimated cost would push the run past this "
+                         "(defaults to budget.max_usd). Enforced BETWEEN passes: a submitted "
+                         "batch cannot be un-billed, so set a console spend cap too")
     sp.set_defaults(func=cmd_extract)
 
     sp = sub.add_parser("audit", help="sample cited claims for the Phase 1 spot audit")

@@ -25,7 +25,9 @@ from pydantic import BaseModel
 
 from .db import Graph
 from .errors import UncitedClaim
-from .llm import Usage, _cacheable, poll_batch, schema_tokens, structured, submit_batch
+from .llm import (
+    BATCH_DISCOUNT, Usage, _cacheable, poll_batch, rate_for, schema_tokens, structured, submit_batch,
+)
 from .models import (
     Citation, Contradiction, Entity, Event, ObjectRecord, Promise, TechniqueSpec, Thread,
 )
@@ -89,6 +91,8 @@ class ExtractReport:
     rejected_uncited: int = 0
     errors: list[str] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
+    passes_done: list[str] = field(default_factory=list)
+    stopped: str = ""
 
     def render(self) -> str:
         lines = [
@@ -100,6 +104,8 @@ class ExtractReport:
             f"records rejected for having no citation: {self.rejected_uncited}",
             self.usage.render(),
         ]
+        if self.stopped:
+            lines.append(f"STOPPED EARLY: {self.stopped}")
         lines += [f"error: {e}" for e in self.errors[:10]]
         return "\n".join(lines)
 
@@ -210,6 +216,47 @@ def _write_records(graph: Graph, scene_id: str, pass_name: str, payload: Any, re
             )
 
 
+# --------------------------------------------------------------------- budget
+# Output tokens can only be guessed before a pass runs. Measured on the entities
+# pass at ~2,200 per scene; round up, because an estimate that guards a spend cap
+# should err towards refusing to spend.
+ASSUMED_OUTPUT_TOKENS = 2_500
+
+
+def _estimate_pass_usd(client, model, profile, pass_name, schema, scene_rows, *, batch: bool) -> float:
+    """What the upcoming pass should cost, priced before a token of it is spent.
+
+    Input is counted for real (``count_tokens`` is free) on a sample of scenes and
+    scaled; output is the constant above. Caching is ignored, so the number is a
+    ceiling — which is what a cap wants.
+    """
+    if not scene_rows:
+        return 0.0
+    tool = {"name": "emit", "description": f"Emit {schema.__name__}.",
+            "input_schema": schema.model_json_schema()}
+    sample = scene_rows[:: max(1, len(scene_rows) // 8)][:8]
+    counted = []
+    for scene in sample:
+        try:
+            n = client.messages.count_tokens(
+                model=model, system=SYSTEM, tools=[tool],
+                messages=[{"role": "user", "content": _scene_prompt(scene, profile, pass_name)}],
+            ).input_tokens
+        except Exception:
+            continue
+        counted.append(int(n))
+    if not counted:
+        # No usable count (offline, or a stub client) — fall back to a coarse
+        # chars/4 estimate rather than silently pricing the pass at zero.
+        counted = [len(_scene_prompt(s, profile, pass_name)) // 4 + schema_tokens(tool["input_schema"])
+                   for s in sample]
+
+    per_scene_in = sum(counted) / len(counted)
+    rate_in, rate_out = rate_for(model)
+    usd = len(scene_rows) * (per_scene_in * rate_in + ASSUMED_OUTPUT_TOKENS * rate_out) / 1_000_000
+    return usd * (BATCH_DISCOUNT if batch else 1.0)
+
+
 # ------------------------------------------------------------------- interface
 def extract(
     graph: Graph,
@@ -220,6 +267,7 @@ def extract(
     passes: Iterable[str] = PASSES,
     scenes: list | None = None,
     use_batch: bool = True,
+    max_usd: float | None = None,
     progress: Callable[[str], None] = lambda _: None,
 ) -> ExtractReport:
     report = ExtractReport()
@@ -230,6 +278,19 @@ def extract(
     for pass_name in passes:
         schema = _schema_for(pass_name)
         progress(f"pass {pass_name}: {len(scene_rows)} scenes")
+        if max_usd is not None:
+            est = _estimate_pass_usd(client, model, profile, pass_name, schema,
+                                     scene_rows, batch=use_batch)
+            spent = report.usage.usd
+            progress(f"  spent ${spent:,.2f} · this pass ≈ ${est:,.2f} · cap ${max_usd:,.2f}")
+            if spent + est > max_usd:
+                report.stopped = (
+                    f"cap ${max_usd:,.2f} would be exceeded at pass {pass_name} "
+                    f"(${spent:,.2f} spent + ${est:,.2f} estimated). "
+                    f"Passes completed: {', '.join(report.passes_done) or 'none'}."
+                )
+                progress(f"  {report.stopped}")
+                break
         if use_batch:
             _run_batch(graph, profile, client, model, pass_name, schema, scene_rows, report, progress)
         else:
@@ -244,6 +305,14 @@ def extract(
                 except (UncitedClaim, Exception) as exc:
                     report.errors.append(f"{scene.scene_id}/{pass_name}: {type(exc).__name__}: {exc}")
         graph.commit()
+        report.passes_done.append(pass_name)
+        if max_usd is not None and report.usage.usd > max_usd:
+            report.stopped = (
+                f"cap ${max_usd:,.2f} passed after {pass_name} (${report.usage.usd:,.2f} spent). "
+                f"Passes completed: {', '.join(report.passes_done)}."
+            )
+            progress(f"  {report.stopped}")
+            break
 
     prune(graph, profile, report)
     graph.commit()
