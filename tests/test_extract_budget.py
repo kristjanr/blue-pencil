@@ -129,3 +129,50 @@ def test_citations_are_pinned_to_the_scene_that_was_sent(world):
     rows = graph.conn.execute(
         "SELECT scene_id FROM citations WHERE record_id=?", ("E-pin",)).fetchall()
     assert rows and all(r[0] == scene_id for r in rows), "no dangling scene reference"
+
+
+# --------------------------------------------------------------- salvage
+def test_unknown_field_costs_the_field_not_the_scene():
+    """`extra=forbid` plus whole-payload validation lost every record in a scene."""
+    from bp.extract import ExtractReport, _Entities, _salvage
+
+    report = ExtractReport()
+    data = {"items": [
+        {"entity_id": "E1", "name": "Keeps", "kind": "character", "kind_note": "",
+         "citations": [{"scene": "book 1.01.1", "quote": "q"}]},
+        {"entity_id": "E2", "name": "Also keeps", "kind": "character",
+         "citations": [{"scene": "book 1.01.1", "quote": "q"}]},
+    ]}
+    out = _salvage(_Entities, data, report, "book 1.01.1/entities")
+    assert [e.entity_id for e in out.items] == ["E1", "E2"], "both records survive"
+    assert report.fields_dropped == 1
+    assert report.records_salvaged == 0
+
+
+def test_out_of_vocabulary_belief_is_dropped_never_guessed():
+    """`believes` could mean knows or believes_false — opposites to the checker."""
+    from bp.extract import ExtractReport, _Events, _salvage
+
+    report = ExtractReport()
+    cit = [{"scene": "book 1.01.1", "quote": "q"}]
+    data = {"items": [{
+        "event_id": "E1", "summary": "s", "when": "2186-01-01", "where": "Sol",
+        "observed_by": ["Ana"], "citations": cit,
+        "beliefs": [
+            {"character": "Boro", "state": "believes"},          # not in the vocabulary
+            {"character": "Ana", "state": "knows"},               # fine
+        ],
+    }]}
+    out = _salvage(_Events, data, report, "book 1.01.1/events")
+    states = [b.state for b in out.items[0].beliefs]
+    assert states == ["knows"], "the ambiguous belief is gone, not reinterpreted"
+    assert report.records_salvaged == 1
+    assert out.items[0].event_id == "E1", "the event itself survives"
+
+
+def test_salvage_still_raises_on_damage_it_cannot_repair():
+    from bp.extract import ExtractReport, _Entities, _salvage
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _salvage(_Entities, {"items": "not a list"}, ExtractReport(), "x/entities")

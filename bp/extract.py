@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .db import Graph
 from .errors import UncitedClaim
@@ -91,6 +91,8 @@ class ExtractReport:
     contradictions: int = 0
     rejected_uncited: int = 0
     citations_repinned: int = 0
+    fields_dropped: int = 0
+    records_salvaged: int = 0
     errors: list[str] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
     passes_done: list[str] = field(default_factory=list)
@@ -105,6 +107,8 @@ class ExtractReport:
             f"contradictions kept open: {self.contradictions}",
             f"records rejected for having no citation: {self.rejected_uncited}",
             f"citations re-pinned to the scene they came from: {self.citations_repinned}",
+            f"salvaged: {self.fields_dropped} unknown fields dropped, "
+            f"{self.records_salvaged} records with an out-of-vocabulary value",
             self.usage.render(),
         ]
         if self.stopped:
@@ -331,6 +335,69 @@ def extract(
     return report
 
 
+def _walk(data, loc):
+    """The container holding ``loc[-1]``, or None if the path does not exist."""
+    node = data
+    for key in loc[:-1]:
+        try:
+            node = node[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+    return node
+
+
+def _salvage(schema, data, report: "ExtractReport", where: str):
+    """Validate a pass's payload, losing the bad record instead of the whole scene.
+
+    ``extra="forbid"`` is deliberate — it is what stops the extraction schema and
+    the table schema drifting apart unnoticed — but combined with whole-payload
+    validation it means one invented field costs a scene every record it had.
+    So keep the strictness and narrow the blast radius: drop the unknown field,
+    drop the record whose enum is outside the vocabulary, and validate again.
+
+    An enum is never guessed. A belief that arrives as ``believes`` could mean
+    ``knows`` or ``believes_false``, and those are opposites to the epistemic
+    checker, so the record goes rather than the polarity being invented.
+    """
+    for _ in range(60):
+        try:
+            return schema.model_validate(data)
+        except ValidationError as exc:
+            progressed = False
+            for err in exc.errors():
+                loc, kind = list(err["loc"]), err["type"]
+                if not loc:
+                    continue
+                parent = _walk(data, loc)
+                if parent is None:
+                    continue
+                if kind == "extra_forbidden":
+                    try:
+                        del parent[loc[-1]]
+                    except (KeyError, IndexError, TypeError):
+                        continue
+                    report.fields_dropped += 1
+                    progressed = True
+                elif kind in ("literal_error", "enum") or kind.startswith("enum"):
+                    # Remove the record that carries the bad value, not the field:
+                    # a belief with no state is not a belief.
+                    for depth in range(len(loc) - 1, 0, -1):
+                        holder, key = _walk(data, loc[:depth]), loc[depth - 1]
+                        if isinstance(holder, list) and isinstance(key, int):
+                            del holder[key]
+                            report.records_salvaged += 1
+                            progressed = True
+                            break
+                    else:
+                        continue
+                if progressed:
+                    break
+            if not progressed:
+                raise
+    report.errors.append(f"{where}: salvage gave up after 60 repairs")
+    raise ValidationError.from_exception_data(schema.__name__, [])
+
+
 def _custom_id(pass_name: str, scene_id: str) -> str:
     """A batch ``custom_id`` the API will accept: ``[a-zA-Z0-9_-]`` only, ≤64 chars.
 
@@ -389,7 +456,8 @@ def _run_batch(graph, profile, client, model, pass_name, schema, scene_rows, rep
         report.usage.add(model, msg.usage, stage=f"extract:{pass_name}", batch=True)
         try:
             block = next(b for b in msg.content if getattr(b, "type", "") == "tool_use")
-            _write_records(graph, scene.scene_id, pass_name, schema.model_validate(block.input), report)
+            payload = _salvage(schema, block.input, report, f"{scene.scene_id}/{pass_name}")
+            _write_records(graph, scene.scene_id, pass_name, payload, report)
         except Exception as exc:
             report.errors.append(f"{scene.scene_id}/{pass_name}: {type(exc).__name__}: {exc}")
 
