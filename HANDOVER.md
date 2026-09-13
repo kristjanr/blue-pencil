@@ -1,143 +1,276 @@
 # Handover — 2026-09-13
 
-State of play after a working session on Blue Pencil, written so the next
-session does not have to re-derive any of it.
+Everything a fresh session needs. Written because the conversation that produced
+all of this is about to be compacted, and none of it should have to be
+re-derived.
 
-## The goal, in one paragraph
+---
 
-Kris is writing a fan-fiction Bobiverse book 7 with this engine. Before that,
-the plan is a **backtest**: feed the engine books 1–5 only, have it write its own
-book 6, and score that against the real book 6 — *The Infinite Extent*, an
-Audible Original he recorded and transcribed himself (see
-`~/Projects/bookz`, and its own `HANDOFF-macOS.md`). The author's tentative
-title for the real book 7 is *The End of All Things*, and he has said book 7
-closes the main timeline.
+## 1. The end goal
 
-**Two goals that want opposite things, and must not be blended.** Validating the
-engine needs a hands-off run — every human judgement is contamination. Getting
-an enjoyable book wants maximum taste. Kris chose: **strict engine-only for the
-backtest**, human involvement afterwards for book 7.
+**Kris wants to read Bobiverse book 7 before Dennis E. Taylor writes it**, and
+would rather build the machine than wait. So the real project is the machine:
+Blue Pencil, an engine that takes an unfinished long series and produces a
+continuation. The book is its output, not the point.
 
-## The contamination question is settled, and the answer is good
+Two things about the real book 7, from the author's own status page
+(dennisetaylor.org/status-of-things, dated 2026-07-12):
 
-`bp probe` was run against the live API. Opus, asked cold, said it knows the
-series through book 4, is aware of book 5, and has **no knowledge of a sixth
-volume** — zero events recalled, and it declined to invent. Saved at
+- His tentative title is ***The End of All Things***. ("No, everyone doesn't
+  die.")
+- **Book 7 is planned to close the main timeline.** The series has been written
+  as a linear future history; later Bobiverse books will exist but be
+  non-linear stand-alones. So a fan book 7 has to *land an ending*, not set up
+  a book 8. That is a real constraint on the plan.
+
+### Before book 7: the backtest
+
+Feed the engine **books 1–5 only**, have it write its own book 6, and score that
+against the real book 6 — ***The Infinite Extent***, an Audible Original that
+Kris recorded off his own playback and transcribed himself.
+
+That book is the reason any of this is measurable. It is an Audible Original
+from 2026 that **no model has in training data**, verified (see §4). A held-out
+text that the thing being tested has never seen is scarce, and he manufactured
+one.
+
+### The decision already taken about rigour
+
+The two goals want opposite things:
+
+| | wants |
+|---|---|
+| Validate the engine | a hands-off run — every human judgement is contamination |
+| Get a book worth reading | maximum taste and iteration |
+
+**Kris chose: strict engine-only for the backtest, then full involvement for
+book 7.** Don't blend them. And note the corollary — *the assistant is also
+contamination*. Whoever has read the real book 6 must not write, steer, or score
+the fan book 6. `bp draft` sees only the context pack assembled from a graph
+built on books 1–5; the engine is the firewall.
+
+---
+
+## 2. Where everything lives
+
+| What | Where |
+|---|---|
+| The engine | `~/Projects/blue-pencil` — git, pushed to `github.com/kristjanr/blue-pencil` |
+| The transcription project | `~/Projects/bookz` — **not** a git repo |
+| Mirror of bookz | `gdrive:bookz/` via rclone (`~/.local/bin/rclone`), 179 objects |
+| API key | login keyring — `secret-tool lookup service anthropic key api` |
+| Memory | `~/.claude/projects/-home-kris-Work/memory/` (4 entries + index) |
+| Transcription notes | `~/Projects/bookz/work/transcription_notes.md` |
+| macOS-side handoff | `~/Projects/bookz/HANDOFF-macOS.md` |
+
+The machine is an **Apple M2 running Linux** (Omarchy/Arch ARM, bare metal —
+`systemd-detect-virt` says `none`). It **dual-boots into macOS**, which matters
+for two planned jobs, both in §5.
+
+---
+
+## 3. Thread A — the transcription (`~/Projects/bookz`)
+
+### Done
+
+*The Infinite Extent* exists as an epub:
+`Dennis E Taylor - (Bobiverse 06) - The Infinite Extent (transcript).epub`
+
+- 71 chapters, ~77.5k words, from a 6h56m PipeWire digital-loopback recording of
+  the Audible narration, transcribed with faster-whisper `large-v3-turbo` on CPU
+  (2.83× realtime, 2h27m).
+- Typeset to match the retail books — checked against Kris's own screenshots of
+  books 4 and 5 in Apple Books: small-caps chapter headings, italic
+  narrator/date/place byline, drop caps, justified indented prose, `* * *` scene
+  breaks, plus front matter (Titles by, title page, dedication, epigraph, and a
+  note stating provenance).
+- Cover: the Audible artwork, extended to 2:3 portrait by an image generator and
+  re-set in the series' chrome lettering (Michroma + gradient + outline).
+  `work/make_cover.sh` rebuilds it.
+- Source of truth is `work/chapters_formatted/*.md`; the epub is **generated** by
+  `work/build_epub.py`. Never hand-edit the epub.
+- **`work/format_book.py` overwrites the hand-fixed chapter files.** Only re-run
+  it after a fresh transcription.
+
+### Known quality limits
+
+`work/transcription_notes.md` has the full list. The two that matter:
+
+- **No quotation marks anywhere** — Whisper does not emit them. So dialogue
+  ratio reads as zero, and any voice metric run against this text measures the
+  transcription, not Taylor. Repair before using book 6 for voice comparison.
+- Chapter 70's title is truncated ("Bob's Discuss"), and one passage at ~5h00m
+  stayed garbled through two transcription passes.
+
+One correction worth keeping: the Bobiverse location is **"In Virt"** (the
+counterpart to "in real"). Whisper hears "invert" every time.
+
+### Live right now — a second recording is in progress
+
+```
+parecord --device=monitor_mic.monitor --rate=48000 --channels=2 --file-format=flac
+         /home/kris/Projects/bookz/recording_2026-09-13.flac
+```
+
+Started by a **second agent session** on the same machine (Kris was connected to
+two). At last check: **6h26m captured, 728 MB, still running**, wrapped in
+`systemd-inhibit --what=idle:sleep:handle-lid-switch` so sleep cannot kill it.
+
+This is the **1.0x-speed** take. The first recording was played at 1.3×, and the
+hypothesis is that normal-speed audio transcribes more accurately. When it
+stops:
+
+1. It is excluded from the gdrive sync (bulk audio is), so **upload it
+   separately** or it stays stranded on a partition macOS cannot read.
+2. Re-transcribe on macOS (§5), then re-run `work/format_book.py` and
+   `work/build_epub.py` to produce a better book 6.
+
+**Do not start a competing recorder.** An earlier duplicate captured silence for
+14 minutes while the real one worked.
+
+---
+
+## 4. Thread B — the engine (`~/Projects/blue-pencil`)
+
+### The contamination question is settled, and the answer is good
+
+`bp probe` ran against the live API. Opus, asked cold, said it knows the series
+through book 4, is aware of book 5, and has **no knowledge of a sixth volume** —
+zero events recalled, and it declined to invent rather than guess. Saved at
 `eval/probe/bobiverse-The Infinite Extent (Bobiverse book 6).json`.
 
-**Book 6 is uncontaminated; the backtest is valid.** That is the premise the
-whole plan rests on, and it now has evidence.
+**Book 6 is uncontaminated. The backtest is valid.**
 
-One caveat that limits what the backtest can measure: the book 6 transcript has
-**no quotation marks** — Whisper does not emit them — so dialogue ratio reads as
-zero and any voice metric run against it measures the transcription, not Taylor.
-Repair that before using book 6 for voice comparison.
-
-## What was wrong, and is now fixed
-
-Seven commits, all pushed to `master`. Every one was found by running the thing
-against real data and noticing numbers that disagreed with each other.
+### Eight commits, all pushed
 
 | Commit | What it fixes |
 |---|---|
 | `9c843c8` | EPUB ingest: text counted twice, drop caps splitting words, chapter heads not found, `book_id` breaking the SCUT lookup |
-| `bfb4f55` | The epistemic check now refuses to run when a channel's availability is unresolved, instead of silently passing everything |
-| `cbe6726` | The model-backed calls brought to the current API — `thinking`, `temperature`, forced `tool_choice` |
+| `bfb4f55` | Epistemic check refuses to run when a channel's availability is unresolved, instead of passing everything silently |
+| `cbe6726` | Model-backed calls brought to the current API — `thinking`, `temperature`, forced `tool_choice` |
 | `dd28306` | Book 3's POVs recovered; a place catalogue replacing the six-entry pair file |
 | `d11b85c` `69fa0b1` | The contamination probe was inverting its own verdict, and its test agreed with the bug |
 | `f547fe5` | Scene breaks printed as ornaments rather than typed — 212 of them, invisible |
+| `f2d3204` | Strict-schema fallback; extraction works |
 
 Measured effect on the corpus:
 
 ```
-words        964,202 -> 523,382   (duplication removed)
-scenes           661 -> 836       (ornament breaks found)
+words        964,202 -> 523,382    (duplication removed)
+scenes           661 -> 836        (ornament breaks found)
 POV assigned      0% -> 96%
 dated             0% -> 96%
 placed            0% -> 61%
-distinct POVs     63 -> 26        (44 were chapter titles)
+distinct POVs     63 -> 26         (44 of them were chapter titles)
 SCUT relay   unresolved -> live from book 2
 ```
 
-The deterministic reasoning core — `knowledge.py`, `space.py`, `timeline.py` —
-had **no bugs**. Every fault was in reading messy input or in the model-backed
-calls. Worth remembering when the "should this just be an LLM?" question comes
-back: the answer that fits the evidence is an LLM at *ingest*, determinism in
-the *reasoning*.
+### The finding worth carrying forward
 
-## Where extraction stands — read this before spending
+**Every bug was in reading messy input or in the model-backed calls. The
+deterministic reasoning core — `knowledge.py`, `space.py`, `timeline.py` — had
+none.** Five books, five typesetting conventions, and the parser only knew the
+ones it was written against.
 
-`bp extract` **works**. A 3-scene smoke test produced 27 entities, all cited,
-none rejected, and the records are good (it marked a character only mentioned in
-passing as `unknown` rather than asserting). Prompt caching is working: 81%
-of input tokens were cache reads.
+So when "should this just use an LLM?" comes back: the answer that fits the
+evidence is **an LLM at ingest, determinism in the reasoning**. Ingest is a
+one-time batchable pass over 359 chapters; the reasoning is where
+reproducibility and auditability live — and Kris cannot read the code, so a
+checker that silently passes is worse for him than one that loudly fails.
 
-Three schema-level rejections were found and fixed **at $0.00**, because a 400
-fires before any generation. Smoke-test before the real spend; it paid for
-itself three times over.
+The deterministic half also proved its own case: every one of those bugs was
+found by *noticing numbers that disagreed with each other*, and re-ingesting to
+check a fix is free and takes seconds.
 
-**But two numbers are not what the plan assumed:**
+### Extraction: works, but two numbers are not what the plan assumed
 
-- **Cost.** Measured **$0.040/scene** for one pass. Naively that is 836 scenes ×
-  4 passes ≈ **$134**, or **~$67 with `--batch`** — against the $10 `bp cost`
-  estimated. The measurement that would settle this was attempted twice and
-  killed both times (see below), so the real figure is still unknown. Best
-  guess **$30–70 batched**, because the sampled scenes were chapter-one
-  cast-introduction scenes, which are the most entity-dense in the corpus.
-- **Speed.** Synchronous extraction runs at roughly **40 s/scene**. The full
-  corpus would be ~37 hours that way. **`--batch` is not the cheap option, it is
-  the only practical one** — it parallelises as well as halving the price.
+`bp extract` produces good records — a 3-scene test gave 27 cited entities, none
+rejected, and it marked a character mentioned only in passing as `unknown`
+rather than asserting. Caching works (81% of input served from cache).
 
-### Unfinished: the steady-state cost measurement
+- **Cost**: measured **$0.040/scene** for one pass → ~$134 for 836 scenes × 4
+  passes, **~$67 with `--batch`**, against the **$10** `bp cost` predicts.
+  `bp cost` is a formula, not a measurement; trust the measurement.
+- **Speed**: ~**40 s/scene** synchronously → ~37 hours for the full corpus.
+  **`--batch` is mandatory, not merely cheaper** — it parallelises as well as
+  halving the price.
 
-Two attempts to measure the rate on mid-corpus scenes both died:
+**Unfinished:** a steady-state measurement on mid-corpus scenes (the sampled
+ones were chapter-one, the most entity-dense in the book, so $67 is likely an
+over-estimate). Two attempts died — one to a timeout set below my own estimate,
+which discarded ~35 scenes of paid work because `extract()` commits at the end
+of a pass; one to the harness reaping a background task. `/tmp/midsample.py`
+holds the per-scene-commit version. **If retrying: do not pipe through `tail`**
+(it buffers, so a killed run shows nothing), and set the timeout far above the
+estimate. Or skip it and run `--batch` over everything.
 
-1. `timeout 1500` on a job estimated at 27–40 min — killed at 25 min, and since
-   `extract()` commits at the end of a pass, **~35 scenes of paid work was
-   discarded**. About $1.40 wasted.
-2. Rewritten to commit per scene, then killed by the harness's background-task
-   reaper. Output was piped through `tail`, which buffers, so no partial
-   progress was visible either.
+---
 
-**If you retry it:** do not pipe through `tail` (it hides progress and makes a
-killed run unreadable), keep the per-scene commit loop, and give it a timeout
-well above the estimate. `/tmp/midsample.py` holds the last version. Or skip the
-measurement entirely and run `--batch` over the whole corpus, accepting ~$67.
+## 5. Thread C — the macOS side
 
-## Uncommitted work
+Kris dual-boots into macOS for two jobs Linux cannot do well:
 
-```
-M bp/llm.py      the strict-schema fallback: `strict: true` is tried, and
-                 dropped for this run if the API rejects the schema as too
-                 complex. This is what made extraction work. TESTED, 94 green,
-                 but NOT YET COMMITTED.
-?? eval/         the saved probe result. Worth keeping.
-```
+1. **Apple-Silicon-native Whisper.** The Linux run was CPU-only because
+   CTranslate2 (what faster-whisper sits on) has only CPU and CUDA backends —
+   the M2 GPU is unreachable from that stack on any OS. On macOS use **MLX
+   Whisper** (Apple's own framework, simplest) or **whisper.cpp + Core ML**.
+   Keep `large-v3-turbo`, the hotword list in `work/hotwords.txt`, and the
+   Bobiverse initial prompt.
+2. **Apple Books annotations.** Kris reads the epub on his iPhone and highlights
+   transcription errors. With iCloud sync those land on macOS at
+   `~/Library/Containers/com.apple.iBooksX/Data/Documents/AEAnnotation/*.sqlite`
+   — table `ZAEANNOTATION`, `ZANNOTATIONSELECTEDTEXT` is the highlight and
+   `ZANNOTATIONNOTE` the note. Highlights are verbatim text from
+   `chapters_formatted/`, so each one greps straight to its chapter. **Not
+   reachable from Linux** — this machine has no macOS layer.
 
-Commit `bp/llm.py` before anything else — extraction does not work without it.
+Two lessons from the Linux transcription that must carry over:
 
-## Environment
+- **Do not cut audio at fixed intervals.** Chunking into rigid 1200 s windows
+  (done to survive an OOM kill) cut mid-sentence and garbled several seams, and
+  swallowed an entire chapter heading. Overlap the windows, or cut on silence.
+- **Turn off `condition_on_previous_text`.** A hallucinated repeat fed itself
+  back as context until it overflowed the model's window and crashed the run.
 
-- **API key** is in the login keyring: `secret-tool lookup service anthropic key api`.
-  `./bp-run <any bp command>` fetches it at launch. **Never run
-  `secret-tool search`** — it prints secrets; that is how a key got exposed in
-  this session and had to be rotated. `lookup | wc -c` is the safe check.
-- Venv at `.venv`, installed `-e`. 94 tests, offline, ~2 s.
-- Corpus in `corpus/` is books 1–5 only. **Book 6 must stay out of it.**
-- `graph/bobiverse.sqlite`: 5 books, 836 scenes, 26 style baselines, 49,581
-  phrases, 24 entities (from the smoke test), 0 events.
+---
 
-## Known gaps, in the order I would take them
+## 6. Next steps, in order
 
-1. **Commit `bp/llm.py`.**
-2. Settle the extraction cost, or accept ~$67 and run `--batch`.
-3. 20 scenes still have no POV, 319 unplaced. Both are parsing/data tails.
-4. Places marked `series?` in `profiles/data/bobiverse-places.csv` are my
-   inferences, not catalogue data — Poseidon, Quin, and the Heaven's River
-   interior locations. A wrong distance makes the checker confidently wrong.
-5. `travel_speed: 0.5c` in the profile predates the later books' faster drives.
-   A geography finding on a book 4–5 chapter may be a calibration artefact
-   rather than a real catch.
-6. Repetition fires 3 hard findings on Taylor's own prose, against the plan's
-   "≤2 false alarms" bar. It compares a chapter to a whole-POV mean, so quiet
-   chapters always look wrong.
+1. **Stop the 1.0x recording** when the book finishes, and upload that FLAC to
+   Drive before rebooting.
+2. **Settle the extraction cost**, or accept ~$67 and run
+   `./bp-run extract --profile bobiverse --batch`. Set a spend cap on the key
+   first.
+3. **`bp audit -n 50`** — the first genuine human gate. Judging the *graph*, not
+   prose, so it does not contaminate the backtest.
+4. **`bp plan` → `bp draft` → `bp check` → `bp accept`** for the fan book 6,
+   hands-off, ~$97.
+5. **Score it**: `bp backtest --profile bobiverse --hide "book 6"`, Tiers A/B/C.
+6. **Then book 7**, with as much human involvement as he wants.
+
+## 7. Open gaps
+
+- 20 scenes still have no POV; 319 unplaced. Parsing/data tails.
+- Places marked `series?` in `profiles/data/bobiverse-places.csv` are inferences,
+  not catalogue data — Poseidon, Quin, the Heaven's River interiors. A wrong
+  distance makes the checker confidently wrong rather than silent.
+- `travel_speed: 0.5c` predates the later books' faster drives, so a geography
+  finding on a book 4–5 chapter may be calibration, not a real catch.
+- Repetition fires 3 hard findings on Taylor's own prose against the plan's "≤2
+  false alarms" bar. It compares one chapter to a whole-POV mean, so quiet
+  chapters always look wrong. Now that 71 real chapters exist as ground truth,
+  they are the obvious calibration set.
+
+## 8. Working notes
+
+- **Never run `secret-tool search`** — it prints secret values. That is how a
+  key was exposed in this session and had to be rotated. Use
+  `secret-tool lookup ... | wc -c` to check.
+- `./bp-run <cmd>` fetches the key at launch and passes it to that one process.
+- Gate commits on a green test run. A commit was pushed red once by chaining
+  `git commit` after `pytest` without checking the exit code.
+- 94 tests, offline, ~2 s. Everything deterministic runs with no API key.
+- Kris vibe-coded this repo with an AI agent and **has not read the code**.
+  Decide code-level questions rather than offering him a choice between
+  implementation behaviours he has no basis to evaluate; tell him the
+  consequence instead. Budget, taste and risk appetite are genuinely his.
