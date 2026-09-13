@@ -22,6 +22,12 @@ DAYS_PER_YEAR = 365.25
 #: One light-year of travel at c, expressed on the day axis.
 DAYS_PER_LIGHT_YEAR = DAYS_PER_YEAR
 
+#: Month names as chapter headers print them, keyed by their first three letters.
+_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
 
 @dataclass(frozen=True, order=True)
 class Span:
@@ -134,6 +140,18 @@ class Calendar:
         if (m := re.fullmatch(r"(-?\d{1,6})", raw)):
             y = int(m.group(1))
             return Span(self._to_day(y, 1, 1), self._to_day(y + 1, 1, 1) - 1)
+        # Prose dates, as chapter headers actually print them: "June 25, 2133"
+        # and the month-precision "February 2167". The second is a span, not a
+        # point — the uncertainty is real and the checkers need it kept.
+        if (m := re.fullmatch(r"([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(-?\d{1,6})", raw)):
+            if (mo := _MONTHS.get(m.group(1)[:3].lower())):
+                return Span.at(self._to_day(int(m.group(3)), mo, int(m.group(2))))
+        if (m := re.fullmatch(r"([A-Za-z]{3,9})\.?\s+(-?\d{1,6})", raw)):
+            if (mo := _MONTHS.get(m.group(1)[:3].lower())):
+                y = int(m.group(2))
+                lo = self._to_day(y, mo, 1)
+                nxt = self._to_day(y + (mo == 12), 1 if mo == 12 else mo + 1, 1)
+                return Span(lo, nxt - 1)
         raise CalendarError(f"cannot parse {raw!r} as a gregorian date")
 
     def _to_day(self, y: int, mo: int, d: int) -> float:

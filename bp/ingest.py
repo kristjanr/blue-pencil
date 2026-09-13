@@ -31,10 +31,31 @@ _CHAPTER_HEAD = re.compile(
 _DATE_LINE = re.compile(
     r"^\s*(?:date|when)?\s*[:\-]?\s*("
     r"\d{4}-\d{2}-\d{2}|\d{4}-\d{2}|\d{3,4}\s*[A-Z]{1,3}|[A-Z][a-z]+\s+\d{1,2},?\s+\d{4}"
+    r"|[A-Z][a-z]{2,8}\s+\d{3,4}"  # a bare month and year: "March 2309"
     r")\s*$",
     re.M,
 )
 _POV_LINE = re.compile(r"^\s*(?:pov|narrator)\s*[:\-]\s*(.+?)\s*$", re.I | re.M)
+
+#: A chapter head as printed. Retail EPUBs routinely style these as an ordinary
+#: <p>, so the tag name cannot be trusted to find them.
+_CHAPTER_HEAD_TEXT = re.compile(
+    r"^\s*(?:(?:chapter|part|prologue|epilogue)\b|\d{1,3}\s*[.:]\s+\S)", re.I
+)
+
+#: The other chapter-head shape: narrator, date and place on one dash-separated
+#: line — "Bob – June 25, 2133 – Epsilon Eridani".
+_DASH_BYLINE = re.compile(
+    r"^[A-Z][\w'.\-]{1,24}(?:\s+[A-Z0-9][\w'.\-]{0,24}){0,2}\s*[–—]\s+\S", re.U
+)
+
+#: Apparatus, not story. Ingesting it pollutes the phrase ledger and the per-POV
+#: style baselines with text the author never wrote in voice.
+_FRONT_MATTER = re.compile(
+    r"^\s*(?:table of contents|contents|copyright|dedication|acknowledge?ments?"
+    r"|about the author|also by|titles by|title page|epigraph|foreword|preface)\b",
+    re.I,
+)
 _PROPER = re.compile(r"\b([A-Z][a-z]{2,}(?:[-–][A-Z0-9][a-z0-9]*)?)\b")
 
 #: Words that start sentences and get mistaken for names by a proper-noun scan.
@@ -82,8 +103,40 @@ class IngestReport:
 
 
 # --------------------------------------------------------------------- readers
+def split_byline(blocks: list[str], *, limit: int = 3) -> tuple[list[str], int]:
+    """The short standalone lines under a chapter head — narrator, date, place.
+
+    Returned as (lines, count_consumed). A byline line is short, is not a
+    sentence, and is not itself a chapter head; prose fails all three.
+    """
+    lines: list[str] = []
+    for block in blocks[:limit]:
+        stripped = block.strip()
+        if (
+            not stripped
+            or len(words(stripped)) > 8
+            or stripped[-1:] in ".!?"
+            or _CHAPTER_HEAD_TEXT.match(stripped)
+        ):
+            break
+        lines.append(stripped)
+    return lines, len(lines)
+
+
 def read_epub(path: Path) -> list[tuple[str, str]]:
-    """(title, plain text) per document in an EPUB, in spine order."""
+    """(title, plain text) per document in an EPUB, in spine order.
+
+    Three things here are load-bearing, and each was a bug found against real
+    retail EPUBs rather than a hypothetical:
+
+    * Block text comes from ``p``/``h*`` only. Including ``div`` as well counts
+      every chapter twice, because the container and its children both match.
+    * Text is joined with no separator. Drop caps are markup — ``<span>D</span>``
+      followed by ``aedalus`` — and a separator splits the word in half.
+    * The chapter head is found by what it says, not by its tag. These books
+      style it as a ``p``, so looking only for ``h1``-``h3`` falls through to the
+      spine filename and every POV reads as ``part0031.html``.
+    """
     from bs4 import BeautifulSoup  # imported lazily: text corpora need neither
     import ebooklib
     from ebooklib import epub
@@ -98,12 +151,56 @@ def read_epub(path: Path) -> list[tuple[str, str]]:
         # measured style layer depends on.
         for br in soup.find_all("br"):
             br.replace_with("\n")
-        blocks = [b.get_text(" ", strip=True) for b in soup.find_all(["p", "h1", "h2", "h3", "div"])]
-        text = "\n\n".join(b for b in blocks if b)
-        if not text.strip():
-            text = soup.get_text("\n", strip=True)
+        # <li> is included because books whose chapter head is a numbered list
+        # item put the entire byline there: "Bob – June 25, 2133".
+        found = soup.find_all(["p", "h1", "h2", "h3", "li"]) or soup.find_all("div")
+        blocks: list[str] = []
+        for b in found:
+            block = re.sub(r"[ \t]+", " ", b.get_text("", strip=False)).strip()
+            if block:
+                blocks.append(block)
+        if not blocks:
+            blocks = [t for t in (soup.get_text("\n", strip=True),) if t]
+
         heading = soup.find(["h1", "h2", "h3"])
-        title = heading.get_text(" ", strip=True) if heading else (item.get_name() or "")
+        title = ""
+        if heading:
+            title = re.sub(r"\s+", " ", heading.get_text(" ", strip=True))
+        head_at = -1
+        for i, block in enumerate(blocks[:4]):
+            if _CHAPTER_HEAD_TEXT.match(block):
+                head_at = i
+                if not title:
+                    title = re.sub(r"\s+", " ", block)
+                break
+
+        body = blocks
+        byline: list[str] = []
+        if head_at >= 0:
+            byline, used = split_byline(blocks[head_at + 1:])
+            body = blocks[head_at + 1 + used:]
+        elif blocks and _DASH_BYLINE.match(blocks[0]):
+            # The other shape: head and byline on one line, dash separated —
+            # "Bob – June 25, 2133". The line is the title as well.
+            title = title or blocks[0]
+            byline = [p.strip() for p in re.split(r"\s*[–—]\s*|\s+-\s+", blocks[0]) if p.strip()]
+            body = blocks[1:]
+
+        if byline:
+            # Normalise to the POV/date header the text reader already
+            # understands, so detect_pov and detect_date need no epub-specific
+            # special case.
+            dated = [ln for ln in byline if _DATE_LINE.match(ln)]
+            rest = [ln for ln in byline if ln not in dated]
+            body = ([f"POV: {rest[0]}"] if rest else []) + dated + rest[1:] + body
+
+        text = "\n\n".join(body)
+        if not text.strip():
+            continue
+        if _FRONT_MATTER.match(title) or (head_at < 0 and _FRONT_MATTER.match(blocks[0])):
+            continue
+        if not title:
+            title = item.get_name() or ""
         if len(words(text)) > 50:
             out.append((title, text))
     return out
@@ -168,7 +265,8 @@ def detect_pov(text: str, header: str, profile: SeriesProfile, known: list[str])
         cand = profile.canonical(stripped)
         if stripped and (cand in known or stripped in known):
             return cand
-        if stripped and len(stripped.split()) <= 2 and stripped[:1].isupper():
+        looks_like_a_file = "/" in stripped or re.search(r"\.\w{2,5}$", stripped)
+        if stripped and not looks_like_a_file and len(stripped.split()) <= 2 and stripped[:1].isupper():
             return cand
     if profile.narration_mode.startswith("first_person"):
         # First-person text rarely names its narrator; the header usually does.
@@ -251,8 +349,11 @@ def ingest(
 
     ordinal = 0
     per_pov: dict[str, list[str]] = {}
-    for book_index, (book_id, docs) in enumerate(raw_books, start=1):
-        graph.add_book(book_id, book_id, book_index)
+    for book_index, (book_title, docs) in enumerate(raw_books, start=1):
+        # Profiles refer to books by position ("available_from: book 2"), so the
+        # id has to be that, not the filename it happened to arrive in.
+        book_id = f"book {book_index}"
+        graph.add_book(book_id, book_title, book_index)
         report.books += 1
         for chapter_index, (title, body) in enumerate(docs, start=1):
             report.chapters += 1
