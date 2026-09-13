@@ -383,6 +383,16 @@ def _salvage(schema, data, report: "ExtractReport", where: str):
                         continue
                     report.unwrapped_json += 1
                     progressed = True
+                elif kind == "list_type" and isinstance(err.get("input"), dict):
+                    # The ledger pass sometimes wraps each list in a second copy
+                    # of its own key: {"objects": {"objects": [...]}}. The records
+                    # are intact one level down.
+                    inner = err["input"].get(loc[-1])
+                    if not isinstance(inner, list):
+                        continue
+                    parent[loc[-1]] = inner
+                    report.unwrapped_json += 1
+                    progressed = True
                 elif kind == "extra_forbidden":
                     try:
                         del parent[loc[-1]]
@@ -390,9 +400,10 @@ def _salvage(schema, data, report: "ExtractReport", where: str):
                         continue
                     report.fields_dropped += 1
                     progressed = True
-                elif kind in ("literal_error", "enum") or kind.startswith("enum"):
+                elif kind in ("literal_error", "enum", "missing") or kind.startswith("enum"):
                     # Remove the record that carries the bad value, not the field:
-                    # a belief with no state is not a belief.
+                    # a belief with no state is not a belief, and an event with no
+                    # summary is a stub the graph has no use for.
                     for depth in range(len(loc) - 1, 0, -1):
                         holder, key = _walk(data, loc[:depth]), loc[depth - 1]
                         if isinstance(holder, list) and isinstance(key, int):

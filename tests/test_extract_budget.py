@@ -190,3 +190,33 @@ def test_a_string_wrapped_array_is_parsed_not_lost():
     out = _salvage(_Entities, {"items": _json.dumps(items)}, report, "book 1.01.1/entities")
     assert [e.entity_id for e in out.items] == ["E1"]
     assert report.unwrapped_json == 1
+
+
+def test_a_dict_wrapped_list_is_unwrapped():
+    """The ledger pass sometimes nests each list inside a copy of its own key."""
+    from bp.extract import ExtractReport, _Ledger, _salvage
+
+    report = ExtractReport()
+    promises = [{"promise_id": "P1", "summary": "a vow", "kind": "vow",
+                 "citations": [{"scene": "book 1.01.1", "quote": "q"}]}]
+    out = _salvage(_Ledger, {"objects": {"objects": []},
+                             "promises": {"promises": promises},
+                             "threads": {"threads": []}},
+                   report, "book 1.01.1/ledger")
+    assert [p.promise_id for p in out.promises] == ["P1"]
+    assert out.objects == [] and out.threads == []
+    assert report.unwrapped_json == 3
+
+
+def test_a_stub_record_missing_required_fields_is_dropped():
+    """One item arrived as {'confidence': 0.9} — no id, no summary."""
+    from bp.extract import ExtractReport, _Events, _salvage
+
+    report = ExtractReport()
+    cit = [{"scene": "book 1.01.1", "quote": "q"}]
+    good = {"event_id": "E1", "summary": "s", "when": "2186-01-01",
+            "where": "Sol", "observed_by": ["Ana"], "citations": cit}
+    out = _salvage(_Events, {"items": [good, {"confidence": 0.9}]},
+                   report, "book 1.01.1/events")
+    assert [e.event_id for e in out.items] == ["E1"], "the stub goes, the real event stays"
+    assert report.records_salvaged == 1
