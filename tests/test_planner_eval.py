@@ -78,9 +78,16 @@ def test_plot_recall_excludes_what_the_bare_model_already_knew():
 
 
 def test_probe_blindness_is_the_admission_ticket():
-    assert ProbeResult(book="x", knows=False, confidence=0.05).blind
+    # The shape a real probe returns: a confident denial with empty hands.
+    assert ProbeResult(book="x", knows=False, confidence=0.9).blind
+    # Claims to know it — not blind, and no need to look further.
     assert not ProbeResult(book="x", knows=True, confidence=0.9).blind
-    assert not ProbeResult(book="x", knows=False, confidence=0.6).blind
+    # Denies knowing it and recalls events anyway. The events are the evidence;
+    # the denial is not.
+    assert not ProbeResult(book="x", knows=False, confidence=0.9,
+                           recalled_events=["the station falls"]).blind
+    # A denial the model is itself unsure of is uncertainty, not blindness.
+    assert not ProbeResult(book="x", knows=False, confidence=0.05).blind
 
 
 def test_tier_b_needs_no_answer_key(world):
