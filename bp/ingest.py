@@ -102,6 +102,35 @@ class IngestReport:
         return "\n".join(lines)
 
 
+#: Class names publishers give the printed scene-break mark.
+_ORNAMENT_CLASS = re.compile(r"fleuron|ornament|asterism|dinkus|flourish|scene.?break", re.I)
+
+
+def _is_ornament(tag) -> bool:
+    """A block with no text that exists only to print a scene-break mark.
+
+    Only consulted for blocks that produced no text at all, so a paragraph of
+    prose can never be mistaken for one.
+    """
+    if _ORNAMENT_CLASS.search(" ".join(tag.get("class") or [])):
+        return True
+    return tag.find("img") is not None
+
+
+def _is_contents(blocks: list[str]) -> bool:
+    """A contents listing: mostly chapter heads, almost no prose.
+
+    Some books split the contents per part, so the page is headed "Part 1"
+    rather than "Contents" and the front-matter name test walks straight past
+    it — leaving a few hundred words of chapter titles to be measured as if
+    the author had written them in voice.
+    """
+    if len(blocks) < 4:
+        return False
+    heads = sum(1 for b in blocks if _CHAPTER_HEAD_TEXT.match(b) or _DASH_BYLINE.match(b))
+    return heads >= len(blocks) * 0.6
+
+
 # --------------------------------------------------------------------- readers
 def split_byline(blocks: list[str], *, limit: int = 3) -> tuple[list[str], int]:
     """The short standalone lines under a chapter head — narrator, date, place.
@@ -155,13 +184,26 @@ def read_epub(path: Path) -> list[tuple[str, str]]:
         # item — sometimes carrying the whole byline ("Bob – June 25, 2133"),
         # sometimes just a title ("Face-Off") with the number in a value=
         # attribute that never reaches the text.
-        found = soup.find_all(["p", "h1", "h2", "h3", "li"]) or soup.find_all("div")
+        # div is included, but only as a leaf. A div that contains paragraphs is
+        # a container, and counting it as well as its children is what doubled
+        # the corpus the first time. A leaf div is where one of these books puts
+        # its scene-break ornament.
+        found = soup.find_all(["p", "h1", "h2", "h3", "li", "div"])
         blocks: list[str] = []
         tags: list[str] = []
         for b in found:
+            if b.name == "div" and b.find(["p", "h1", "h2", "h3", "li", "div"]) is not None:
+                continue
             block = re.sub(r"[ \t]+", " ", b.get_text("", strip=False)).strip()
             if block:
                 blocks.append(block)
+                tags.append(b.name)
+            elif _is_ornament(b):
+                # A scene break set as a printed ornament rather than "* * *".
+                # It carries no text, so a text-matching break detector sees
+                # nothing and the whole chapter arrives as one scene. One book
+                # here hides 128 breaks this way — half its real granularity.
+                blocks.append("* * *")
                 tags.append(b.name)
         if not blocks:
             blocks = [t for t in (soup.get_text("\n", strip=True),) if t]
@@ -226,6 +268,8 @@ def read_epub(path: Path) -> list[tuple[str, str]]:
         if not text.strip():
             continue
         if _FRONT_MATTER.match(title) or (head_at < 0 and _FRONT_MATTER.match(blocks[0])):
+            continue
+        if _is_contents(blocks):
             continue
         if not title:
             title = item.get_name() or ""
