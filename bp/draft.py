@@ -341,9 +341,16 @@ def draft_scene(
 
 def revise(
     graph: Graph, profile: SeriesProfile, policy: RunPolicy, client, card: ChapterCard,
-    *, text: str, marginalia: list, scene_index: int = 1, usage: Usage | None = None,
+    *, text: str, marginalia: list, scene_index: int = 1, human_note: str = "",
+    usage: Usage | None = None,
 ) -> str:
-    """Send a scene back with its marginalia attached.
+    """Send a scene back with its marginalia attached, and — when a human
+    rejected it through ``bp check --serve`` — the reason they gave.
+
+    ``human_note`` is first-class input, not context: a rejection that only
+    says "no" teaches the reviser nothing the checkers' own marginalia didn't
+    already say, and it is the one channel through which taste ("this should
+    feel quieter, and end badly") can reach the prose at all.
 
     The pack grows here — a failed information-path check pulls in the channel
     and distance data it was decided on, a voice failure pulls in more
@@ -356,11 +363,16 @@ def revise(
     )
     pack = build_pack(graph, profile, policy, card, scene_index=scene_index,
                       budget_tokens=policy.context_max_tokens)
+    human_block = (
+        f"\n\n--- EDITOR'S NOTE (why a human sent this back — follow it) ---\n{human_note.strip()}"
+        if human_note.strip() else ""
+    )
     prompt = (
         f"{pack.scene_brief}\n\n"
-        f"Here is your draft, and an editor's marginalia. Revise it. Fix every hard finding. "
-        f"Change nothing the marginalia did not ask about.\n\n"
-        f"--- DRAFT ---\n{text}\n\n--- MARGINALIA ---\n{notes}"
+        f"Here is your draft, and an editor's marginalia. Fix every hard finding, and honour the "
+        f"editor's note below if there is one. Change nothing else the marginalia or the note did "
+        f"not ask about.\n\n"
+        f"--- DRAFT ---\n{text}\n\n--- MARGINALIA ---\n{notes}{human_block}"
     )
     return write(client, policy.model_for("draft"),
                  stable_blocks=pack.stable, tail_blocks=pack.per_chapter,

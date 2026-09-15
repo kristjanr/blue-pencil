@@ -68,6 +68,11 @@ text-align:right;margin-right:12px;user-select:none;text-indent:0}
 .card{border:1px solid var(--rule);padding:12px 14px;margin-bottom:16px;font:12.5px var(--mono)}
 .card h2{font:11px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--blue);margin:0 0 8px}
 .empty{color:var(--muted);font-style:italic}
+.noteBox{margin-bottom:16px}
+.noteBox label{display:block;font:11px var(--mono);letter-spacing:.07em;text-transform:uppercase;
+color:var(--muted);margin-bottom:6px}
+.noteBox textarea{width:100%;min-height:70px;resize:vertical;font:14px var(--serif);color:var(--ink);
+background:var(--paper);border:1px solid var(--rule);padding:8px 10px}
 #done{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.6);color:#fff;
 font:16px var(--mono);z-index:9}
 @media(max-width:1000px){main{grid-template-columns:1fr}.margin{position:static;max-height:none}}
@@ -76,15 +81,16 @@ font:16px var(--mono);z-index:9}
 _JS = """
 const post = (verdict) => {
   document.querySelectorAll('button').forEach(b => b.disabled = true);
+  const note = (document.getElementById('note') || {}).value || '';
   fetch('/decide', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({verdict, ref: REF})})
+    body: JSON.stringify({verdict, note, ref: REF})})
     .then(() => { document.getElementById('done').style.display='grid';
                   document.getElementById('done').textContent = verdict + ' — you can close this tab'; })
     .catch(e => { document.getElementById('done').style.display='grid';
                   document.getElementById('done').textContent = 'could not reach bp: ' + e; });
 };
 document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   if (e.key === 'a') post('accepted');
   if (e.key === 'r') post('rejected');
   if (e.key === 'v') post('revise');
@@ -148,11 +154,15 @@ def render_html(draft: Draft, scorecard: Scorecard, *, card: ChapterCard | None 
                    + "</div>")
 
     actions = ""
+    note_html = ""
     if serve:
         actions = ('<div class="actions">'
                    '<button class="go" onclick="post(\'accepted\')">accept (a)</button>'
                    '<button onclick="post(\'revise\')">revise (v)</button>'
                    '<button onclick="post(\'rejected\')">reject (r)</button></div>')
+        note_html = ('<div class="noteBox"><label for="note">why? (reaches the reviser if you choose '
+                    'revise)</label>'
+                    '<textarea id="note" placeholder="e.g. this should feel quieter, and end badly"></textarea></div>')
 
     head = title or f"{draft.ref}"
     return f"""<!doctype html><html><head><meta charset="utf-8">
@@ -169,7 +179,7 @@ def render_html(draft: Draft, scorecard: Scorecard, *, card: ChapterCard | None 
 </header>
 <main>
   <div class="manuscript">{"".join(body_lines)}</div>
-  <div class="margin">{card_html}{skipped}{"".join(marks_html)}</div>
+  <div class="margin">{note_html}{card_html}{skipped}{"".join(marks_html)}</div>
 </main>
 <div id="done"></div>
 <script>const REF = {json.dumps(draft.ref)};{_JS}</script>
@@ -185,8 +195,13 @@ def write_page(path: str | Path, draft: Draft, scorecard: Scorecard, *,
 
 
 def serve_review(draft: Draft, scorecard: Scorecard, *, card: ChapterCard | None = None,
-                 port: int = 8765, open_browser: bool = True) -> str:
-    """Serve the page and block until the human decides. Returns their verdict.
+                 port: int = 8765, open_browser: bool = True) -> tuple[str, str]:
+    """Serve the page and block until the human decides. Returns (verdict, note).
+
+    ``note`` is whatever the human typed in the free-text box, or ``""``. A
+    rejection with no reason attached tells the reviser nothing it didn't
+    already know from the checkers' own marginalia — the note is what lets a
+    human actually speak here, not just veto.
 
     This is the whole 'accept/reject buttons that call bp' surface: a local
     server, one decision, then it shuts down. No daemon, no state.
@@ -194,7 +209,7 @@ def serve_review(draft: Draft, scorecard: Scorecard, *, card: ChapterCard | None
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     page = render_html(draft, scorecard, card=card, serve=True).encode("utf-8")
-    verdict: dict[str, str] = {}
+    decision: dict[str, str] = {}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # keep the terminal clean
@@ -210,7 +225,8 @@ def serve_review(draft: Draft, scorecard: Scorecard, *, card: ChapterCard | None
         def do_POST(self):
             length = int(self.headers.get("Content-Length", 0))
             payload = json.loads(self.rfile.read(length) or b"{}")
-            verdict["value"] = str(payload.get("verdict", "rejected"))
+            decision["verdict"] = str(payload.get("verdict", "rejected"))
+            decision["note"] = str(payload.get("note", "")).strip()
             self.send_response(204)
             self.end_headers()
 
@@ -223,10 +239,10 @@ def serve_review(draft: Draft, scorecard: Scorecard, *, card: ChapterCard | None
         except Exception:
             pass
     try:
-        while "value" not in verdict:
+        while "verdict" not in decision:
             server.handle_request()
     except KeyboardInterrupt:
-        return "rejected"
+        return "rejected", ""
     finally:
         server.server_close()
-    return verdict["value"]
+    return decision["verdict"], decision["note"]

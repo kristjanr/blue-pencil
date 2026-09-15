@@ -1,9 +1,11 @@
 """Context packs and state commit — the parts that work without a model."""
 
+from types import SimpleNamespace
+
 from bp.accept import accept_chapter, state_before
-from bp.draft import bible_digest, build_pack, knowledge_block, style_block
+from bp.draft import bible_digest, build_pack, knowledge_block, revise, style_block
 from bp.draftdoc import Draft
-from bp.models import ChapterCard
+from bp.models import ChapterCard, Marginalium
 from bp.policy import RunPolicy
 
 
@@ -41,6 +43,58 @@ def test_pack_respects_its_token_budget(world):
     policy = RunPolicy.from_dict({"context": {"start_tokens": 4000, "max_tokens": 8000}})
     pack = build_pack(graph, profile, policy, _card())
     assert pack.tokens <= 4000 * 1.15          # trimming is coarse but bounded
+
+
+class _FakeReviseStream:
+    def __init__(self, captured, kwargs):
+        captured.append(kwargs)
+        self.text_stream = iter(["revised prose"])
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get_final_message(self):
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="revised prose")],
+            stop_reason="end_turn",
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5,
+                                  cache_read_input_tokens=0, cache_creation_input_tokens=0),
+        )
+
+
+class _FakeReviseClient:
+    def __init__(self):
+        self.calls: list[dict] = []
+        self.messages = SimpleNamespace(stream=lambda **kw: _FakeReviseStream(self.calls, kw))
+
+
+def test_revise_carries_a_human_note_as_a_followed_instruction(world):
+    """The bug this test exists for: a human rejection through `bp check
+    --serve` used to have nowhere to go — revise() was driven only by the
+    checkers' own marginalia. The note must reach the prompt, marked as
+    something to follow rather than mere context."""
+    graph, profile = world
+    client = _FakeReviseClient()
+    marginalia = [Marginalium(check="voice", severity="soft", message="a bit flat")]
+    revise(graph, profile, RunPolicy.from_dict({}), client, _card(),
+          text="Some draft text.", marginalia=marginalia,
+          human_note="make it quieter, and end badly")
+    prompt = client.calls[0]["messages"][0]["content"]
+    assert "EDITOR'S NOTE" in prompt
+    assert "make it quieter, and end badly" in prompt
+
+
+def test_revise_without_a_note_omits_the_editors_note_block(world):
+    graph, profile = world
+    client = _FakeReviseClient()
+    marginalia = [Marginalium(check="voice", severity="soft", message="a bit flat")]
+    revise(graph, profile, RunPolicy.from_dict({}), client, _card(),
+          text="Some draft text.", marginalia=marginalia)
+    prompt = client.calls[0]["messages"][0]["content"]
+    assert "EDITOR'S NOTE" not in prompt
 
 
 def test_trimming_never_sacrifices_the_knowledge_block(world):

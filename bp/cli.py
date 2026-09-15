@@ -198,8 +198,22 @@ def cmd_check(args) -> int:
         _echo(scorecard.render(verbose=not args.quiet))
 
     if args.serve:
-        verdict = serve_review(draft, scorecard, card=card, port=args.port)
-        _echo(f"verdict: {verdict}")
+        verdict, note = serve_review(draft, scorecard, card=card, port=args.port)
+        _echo(f"verdict: {verdict}" + (f"\n  note: {note}" if note else ""))
+        if verdict == "revise":
+            if card is None:
+                _echo("no chapter card — cannot revise without one (pass --card or set the draft's `card:` id)")
+            else:
+                from .draft import revise
+
+                revise_client = client or _client_or_none(True)
+                revised = revise(graph, profile, policy, revise_client, card,
+                                 text=draft.text, marginalia=scorecard.hard + scorecard.soft,
+                                 human_note=note)
+                out_path = draft.path.with_name(draft.path.stem + ".revised" + draft.path.suffix) \
+                    if draft.path else Path(f"{draft.ref}.revised.md")
+                out_path.write_text(revised + "\n", encoding="utf-8")
+                _echo(f"  revised draft: {out_path}")
     elif args.html:
         path = write_page(args.html, draft, scorecard, card=card)
         _echo(f"\nreview page: {path}")

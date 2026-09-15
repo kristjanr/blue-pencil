@@ -35,6 +35,19 @@ def test_review_page_is_theme_aware_and_escapes_content(world):
     assert "prefers-color-scheme:dark" in html
 
 
+def test_serve_mode_renders_a_note_box_but_a_static_page_does_not(world):
+    """The static `--html` page has nowhere to send a POST, so the note box —
+    and the accept/revise/reject buttons — only belong on `--serve`."""
+    graph, profile = world
+    draft = Draft.load(CHAPTERS / "planted.md")
+    sc = run_checks(CheckContext(draft=draft, graph=graph, profile=profile,
+                                 policy=RunPolicy.from_dict({})))
+    served = render_html(draft, sc, serve=True)
+    static = render_html(draft, sc, serve=False)
+    assert 'id="note"' in served and "revise (v)" in served
+    assert 'id="note"' not in static and "revise (v)" not in static
+
+
 def test_front_matter_is_excluded_from_the_prose_but_counted_in_line_numbers():
     draft = Draft.load(CHAPTERS / "clean.md")
     assert draft.pov == "Ana" and draft.place == "Sol"
