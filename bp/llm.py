@@ -343,14 +343,31 @@ def structured(
         tool = plain_tool
         msg = _retry(call)
 
+    def _emitted(m):
+        for block in m.content:
+            if getattr(block, "type", "") == "tool_use":
+                return block.input
+        return None
+
     if usage is not None:
         usage.add(model, msg.usage, stage=stage)
     if getattr(msg, "stop_reason", "") == "refusal":
         raise Refused(f"{model} refused a structured request ({stage or 'unstaged'})")
-    for block in msg.content:
-        if getattr(block, "type", "") == "tool_use":
-            return schema.model_validate(block.input)
-    raise ValueError(f"{model} returned no structured output for {schema.__name__}")
+
+    payload = _emitted(msg)
+    if payload is None and tool is strict_tool:
+        # A strict schema is not always rejected loudly. Sometimes the call
+        # succeeds and the model simply declines to emit, which used to fall
+        # through to "no structured output" and lose the work. Same remedy as
+        # the loud case: drop to the plain tool and ask once more.
+        tool = plain_tool
+        msg = _retry(call)
+        if usage is not None:
+            usage.add(model, msg.usage, stage=stage)
+        payload = _emitted(msg)
+    if payload is None:
+        raise ValueError(f"{model} returned no structured output for {schema.__name__}")
+    return schema.model_validate(payload)
 
 
 def structured_many(

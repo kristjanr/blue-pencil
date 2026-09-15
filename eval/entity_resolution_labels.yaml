@@ -1,0 +1,82 @@
+# Human verdicts on ambiguous entity groups, from Kris's review of the 126 that
+# survived the mechanical merge. These are the test set for bp.resolve: an
+# adjudicator that cannot reproduce these is not trusted on the unlabelled rest.
+#
+# verdict: merge_all | split_all | partial | defect
+#   partial carries `clusters`: the ids that belong together
+#   defect  means the records are wrong about the world, not merely duplicated
+
+- group: the Bobs
+  verdict: merge_all
+
+- group: Alexander
+  verdict: defect
+  note: "no Bob copy named Alexander exists; the record is invented"
+
+- group: Kevin
+  verdict: partial
+  clusters: [[kevin, kevin_dungeon_npc]]
+  note: "first and third are the same; the CryoEterna rep is someone else"
+
+- group: Tim
+  verdict: merge_all
+  note: "the game character died on Virt, not the replicant playing it — death
+         of an avatar is not death of the entity"
+
+- group: Bob (original)
+  verdict: merge_all
+  also_same_as: [Bob Johansson, Robert]
+
+- group: Bob Johansson
+  verdict: merge_all
+  also_same_as: [Bob (original), Robert]
+
+- group: Pete
+  verdict: merge_all
+  note: "only his Virt character died"
+
+- group: Robert
+  verdict: merge_all
+  also_same_as: [Bob Johansson]
+  note: "second record needs the chapter read to place it"
+
+- group: Verne
+  verdict: merge_all
+
+- group: Belinda
+  verdict: split_all
+  confidence: low
+  note: "Kris: 'different, I think. But double check'"
+
+- group: Buster
+  verdict: merge_all
+  also_same_as: [Buster]
+
+- group: Charlie
+  verdict: defect
+  note: "moose form vs Deltan form contradict; likely Bill not Bob. Bullwinkle
+         is the moose. Needs the chapter."
+
+- group: Diana
+  verdict: merge_all
+  note: "alive in book 2, died later — status differs by date, not identity"
+
+- group: Enoki
+  verdict: merge_all
+  note: "Enoki is Bob; Theresa calls him that"
+
+- group: Jeeves
+  verdict: merge_all
+
+- group: Harvey
+  verdict: split_all
+
+- group: Guppy
+  verdict: merge_all
+  confidence: low
+  note: "every replicant has a Guppy (an AMI); same kind, arguably distinct
+         instances. Kris unsure."
+
+- group: Survey Drone
+  verdict: split_all
+  note: "replicants each have multiple survey drones; these are not duplicates"
