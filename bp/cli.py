@@ -226,9 +226,11 @@ def cmd_plan(args) -> int:
     client = _client_or_none(True)
     if args.what == "thesis":
         hypotheses = propose_thesis(graph, profile, policy, client, n=args.n)
-        total = sum(p["weight"] for p in graph.promises("open")) or 1.0
+        weights = {p["promise_id"]: p["weight"] for p in graph.promises("open")}
         for i, h in enumerate(hypotheses, 1):
-            _echo(f"[{i}] {h.summary}   (evidence {h.evidence_score(total):.2f})")
+            self_report = 0.2 * h.fits_author_statements + 0.2 * h.structural_symmetry
+            _echo(f"[{i}] {h.summary}   (graph evidence {h.graph_evidence(weights):.2f} · "
+                  f"self-report {self_report:.2f} · total {h.evidence_score(weights):.2f})")
             _echo(f"     pays {len(h.pays)} promises · orphans {len(h.orphans)}")
             _echo(f"     {h.rationale[:400]}\n")
         out = ws.plan / "thesis.json"

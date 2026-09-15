@@ -294,12 +294,34 @@ class EndingHypothesis(Base):
     rationale: str = ""
     citations: list[Citation] = Field(default_factory=list)
 
-    def evidence_score(self, total_weight: float) -> float:
-        paid = len(self.pays)
-        orphaned = len(self.orphans)
-        coverage = paid / total_weight if total_weight else 0.0
-        penalty = orphaned / total_weight if total_weight else 0.0
-        return max(0.0, coverage - 0.5 * penalty) * 0.6 + 0.2 * self.fits_author_statements + 0.2 * self.structural_symmetry
+    def graph_evidence(self, weights: dict[str, float]) -> float:
+        """Fraction of the ledger's total weight this hypothesis pays off, net
+        of what it orphans. The only term in :meth:`evidence_score` the graph
+        can verify — ``weights`` maps every open promise's id to its weight,
+        so a promise id the model invented (not a key in ``weights``) counts
+        for nothing rather than crashing the lookup.
+
+        ``pays``/``orphans`` are *ids*, not weight, so this must sum the
+        weights they name rather than count them: counting them against a
+        *summed* total_weight silently collapses coverage toward zero no
+        matter how good the hypothesis is, because a promise count and a
+        summed weight are not the same unit.
+        """
+        total = sum(weights.values()) or 1.0
+        paid_weight = sum(weights.get(pid, 0.0) for pid in self.pays)
+        orphan_weight = sum(weights.get(pid, 0.0) for pid in self.orphans)
+        return max(0.0, (paid_weight - 0.5 * orphan_weight) / total)
+
+    def evidence_score(self, weights: dict[str, float]) -> float:
+        """Ranking score: mostly graph evidence, a fifth each self-reported.
+
+        The two self-reported terms are the model's own opinion of its
+        hypothesis, not something the graph checked — call
+        :meth:`graph_evidence` directly to show the verifiable part on its
+        own rather than blended into this one.
+        """
+        return (self.graph_evidence(weights) * 0.6
+                + 0.2 * self.fits_author_statements + 0.2 * self.structural_symmetry)
 
 
 class Marginalium(Base):

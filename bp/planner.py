@@ -157,17 +157,29 @@ def propose_thesis(
         for p in sorted(promises, key=lambda r: -r["weight"])[:120]
     )
     threads = "\n".join(f"- {t['thread_id']}: {t['name']} — {t['state']}" for t in graph.threads("open")[:60])
-    prompt = (
-        f"SERIES: {profile.name}\n\n"
-        f"OPEN PROMISES (the ledger of everything the text has promised to pay off):\n{ledger}\n\n"
-        f"OPEN THREADS:\n{threads}\n\n"
-        f"Propose {n} genuinely different full-series resolutions. For each, list the promise IDs "
-        f"it pays and the ones it orphans. Make at least two of them uncomfortable."
-    )
-    result = structured(client, policy.model_for("plan"), _Hypotheses, system=THESIS_SYSTEM,
-                        prompt=prompt, max_tokens=12_000, usage=usage, stage="plan:thesis")
-    weight = sum(p["weight"] for p in promises) or 1.0
-    return sorted(result.items, key=lambda h: -h.evidence_score(weight))
+
+    def ask(count: int, extra: str = "") -> list[EndingHypothesis]:
+        prompt = (
+            f"SERIES: {profile.name}\n\n"
+            f"OPEN PROMISES (the ledger of everything the text has promised to pay off):\n{ledger}\n\n"
+            f"OPEN THREADS:\n{threads}\n\n"
+            f"Propose {count} genuinely different full-series resolutions. For each, list the promise IDs "
+            f"it pays and the ones it orphans. Make at least two of them uncomfortable." + extra
+        )
+        result = structured(client, policy.model_for("plan"), _Hypotheses, system=THESIS_SYSTEM,
+                            prompt=prompt, max_tokens=12_000, usage=usage, stage="plan:thesis")
+        return result.items
+
+    # `n` in the prompt is a request, not an enforced count — a model asked
+    # for 2 has returned 1. Ask once more for exactly the shortfall rather
+    # than silently handing back fewer hypotheses than were asked for.
+    items = ask(n)
+    if len(items) < n:
+        missing = n - len(items)
+        items = items + ask(missing, extra=f" Return exactly {missing} — no more, no fewer.")
+
+    weights = {p["promise_id"]: p["weight"] for p in promises}
+    return sorted(items, key=lambda h: -h.evidence_score(weights))[:n]
 
 
 # --------------------------------------------------------------- move tournament
