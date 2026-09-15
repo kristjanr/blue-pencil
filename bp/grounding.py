@@ -216,3 +216,41 @@ def check_grounding(graph, *, min_terms: int = 2, common_at: float = 0.05) -> Re
 
     report.records = len(seen_records)
     return report
+
+
+# ----------------------------------------------------------------- remediation
+_TABLE_FOR = {"entity": ("entities", "entity_id"), "event": ("events", "event_id"),
+              "object": ("objects", "object_id"), "promise": ("promises", "promise_id"),
+              "thread": ("threads", "thread_id")}
+
+UNPROVEN_CONFIDENCE = 0.5
+
+
+def demote_unproven(graph, report: Report) -> dict[str, int]:
+    """Strip the authority of evidence from records that have none.
+
+    Extraction already does this for a record that arrives with no citation at
+    all: it backfills the scene, marks the record ``inferred`` rather than
+    ``explicit``, and caps confidence. A record whose quote cannot be found in
+    the scene it names is in exactly that position — it asserts evidence that
+    does not exist — so it earns the same treatment.
+
+    The record is kept, not deleted. It may well be true; what it cannot do is
+    prove itself, and the planner should weigh it accordingly rather than
+    trusting it as though a human had checked it.
+    """
+    counts: dict[str, int] = {}
+    for f in report.findings:
+        if f.quote_ok:
+            continue
+        table, idcol = _TABLE_FOR.get(f.kind, (None, None))
+        if table is None:
+            continue
+        cur = graph.conn.execute(
+            f"UPDATE {table} SET claim_type='inferred', confidence=MIN(confidence, ?) "
+            f"WHERE {idcol}=? AND (claim_type != 'inferred' OR confidence > ?)",
+            (UNPROVEN_CONFIDENCE, f.record_id, UNPROVEN_CONFIDENCE))
+        if cur.rowcount:
+            counts[f.kind] = counts.get(f.kind, 0) + cur.rowcount
+    graph.conn.commit()
+    return counts

@@ -57,3 +57,53 @@ def test_a_real_quote_passes(world):
     graph.commit()
     rep = check_grounding(graph)
     assert not any(f.record_id == "E-real" and not f.quote_ok for f in rep.findings)
+
+
+def test_demotion_strips_authority_but_keeps_the_record(world):
+    """An unprovable record may still be true; what it cannot do is prove itself."""
+    from bp.grounding import demote_unproven
+
+    graph, _ = world
+    scene = graph.scenes()[0].scene_id
+    graph.write_event(Event(
+        event_id="E-unproven", summary="Asserted without evidence",
+        when="2186-01-01", where="Sol", observed_by=["Ana"],
+        claim_type="explicit", confidence=0.95,
+        citations=[Citation(scene=scene, quote="a line that is nowhere in this corpus")]))
+    graph.write_event(Event(
+        event_id="E-proven", summary="Backed by the page",
+        when="2186-01-01", where="Sol", observed_by=["Ana"],
+        claim_type="explicit", confidence=0.95,
+        citations=[Citation(scene=scene,
+                            quote=" ".join(graph.scenes()[0].text.split()[:8]))]))
+    graph.commit()
+
+    counts = demote_unproven(graph, check_grounding(graph))
+    assert counts.get("event", 0) >= 1
+
+    row = graph.conn.execute(
+        "SELECT claim_type, confidence FROM events WHERE event_id='E-unproven'").fetchone()
+    assert row["claim_type"] == "inferred"
+    assert row["confidence"] <= 0.5
+    # still there — deletion would lose a claim that is probably true
+    assert graph.conn.execute(
+        "SELECT COUNT(*) FROM events WHERE event_id='E-unproven'").fetchone()[0] == 1
+
+    keep = graph.conn.execute(
+        "SELECT claim_type, confidence FROM events WHERE event_id='E-proven'").fetchone()
+    assert keep["claim_type"] == "explicit" and keep["confidence"] == 0.95
+
+
+def test_demotion_is_idempotent(world):
+    from bp.grounding import demote_unproven
+
+    graph, _ = world
+    graph.write_event(Event(
+        event_id="E-twice", summary="Unprovable", when="2186-01-01", where="Sol",
+        observed_by=["Ana"], claim_type="explicit", confidence=0.9,
+        citations=[Citation(scene=graph.scenes()[0].scene_id, quote="not in the corpus at all")]))
+    graph.commit()
+    first = demote_unproven(graph, check_grounding(graph))
+    second = demote_unproven(graph, check_grounding(graph))
+    assert first.get("event", 0) >= 1
+    assert second.get("event", 0) == 0, "a second run must be a no-op"

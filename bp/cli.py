@@ -119,6 +119,16 @@ def cmd_ground(args) -> int:
     profile = ws.load_profile(args.profile)
     graph = ws.open_graph(profile, db=args.db)
     report = check_grounding(graph)
+    if args.demote:
+        from .grounding import demote_unproven
+
+        counts = demote_unproven(graph, report)
+        total = sum(counts.values())
+        _echo(f"demoted {total:,} records that cannot prove themselves "
+              f"(claim_type -> inferred, confidence capped at 0.5)")
+        for kind, n in sorted(counts.items(), key=lambda t: -t[1]):
+            _echo(f"  {kind}: {n:,}")
+        _echo("")
     if args.json:
         _echo(json.dumps([f.__dict__ | {"severity": f.severity,
                                         "grounding": round(f.grounding, 3)}
@@ -630,6 +640,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("ground", help="test every citation against the scene it names (no model, no cost)")
     common(sp)
     sp.add_argument("--show", type=int, default=25, help="how many worst findings to print")
+    sp.add_argument("--demote", action="store_true",
+                    help="mark records whose quote cannot be found as inferred, confidence 0.5")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_ground)
 
