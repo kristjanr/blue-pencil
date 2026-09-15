@@ -267,6 +267,19 @@ CREATE TABLE IF NOT EXISTS phrase_ledger (
     PRIMARY KEY (phrase, scene_id)
 );
 
+-- Why a human accepted a chapter, not just that they did. `accept` is a
+-- one-line log entry; this is where the reasoning behind it accumulates, so a
+-- later run can ask what an editor has consistently asked for.
+CREATE TABLE IF NOT EXISTS editor_notes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    book        TEXT NOT NULL,
+    chapter     INTEGER NOT NULL,
+    scene_ids   TEXT DEFAULT '[]',
+    note        TEXT NOT NULL,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_editor_notes_book ON editor_notes(book, chapter);
+
 -- An entity merge deletes `old_id` after rewriting every in-graph reference to
 -- `new_id`, which is right for the graph's own foreign keys but leaves nothing
 -- for an OUTSIDE reference to redirect through -- a citation kept in someone's
@@ -720,6 +733,24 @@ class Graph:
         if status:
             return list(self.conn.execute("SELECT * FROM threads WHERE status=?", (status,)))
         return list(self.conn.execute("SELECT * FROM threads"))
+
+    def write_editor_note(self, *, book: str, chapter: int, scene_ids: Sequence[str], note: str) -> None:
+        """Record why a human accepted a chapter, not just that they did.
+
+        Kept even across the review surfaces that don't commit anything (a
+        rejection through ``bp check --serve`` isn't an accept), so this is
+        the one place that accumulates: an accepted chapter, with the
+        reasoning that went with it.
+        """
+        self.conn.execute(
+            "INSERT INTO editor_notes (book, chapter, scene_ids, note) VALUES (?,?,?,?)",
+            (book, chapter, _j(list(scene_ids)), note))
+
+    def editor_notes(self, book: str | None = None) -> list[sqlite3.Row]:
+        if book:
+            return list(self.conn.execute(
+                "SELECT * FROM editor_notes WHERE book=? ORDER BY id", (book,)))
+        return list(self.conn.execute("SELECT * FROM editor_notes ORDER BY id"))
 
     def contradictions(self, *, unresolved_only: bool = False) -> list[sqlite3.Row]:
         sql = "SELECT * FROM contradictions"

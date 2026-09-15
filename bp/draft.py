@@ -265,10 +265,11 @@ def _scene_brief(card: ChapterCard, scene_index: int) -> str:
     spec = card.scenes[scene_index - 1] if 0 < scene_index <= len(card.scenes) else {}
     budget = spec.get("word_budget") or (card.word_budget // total)
     beats = spec.get("beats", card.turn or card.goal)
+    feel = f"\nShould feel like: {card.feel}" if card.feel.strip() else ""
     return (f"WRITE SCENE {scene_index} OF {total}.\n"
             f"Beats: {beats}\n"
             f"Word budget: {budget}\n"
-            f"POV: {card.pov} · {card.location} · {card.date_inworld}")
+            f"POV: {card.pov} · {card.location} · {card.date_inworld}{feel}")
 
 
 def _fit(pack: ContextPack, budget: int) -> None:

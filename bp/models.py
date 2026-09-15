@@ -238,6 +238,10 @@ class ChapterCard(Base):
     cast: list[str] = Field(default_factory=list)
     goal: str = ""
     turn: str = ""
+    feel: str = Field(
+        default="", description="What this chapter should feel like, e.g. 'quiet, and ends badly' — "
+                                "prose guidance for the drafter, not a structural obligation the "
+                                "card checker verifies")
     reveals: list[dict[str, str]] = Field(
         default_factory=list, description="[{what, to_whom, channel}] — writes to the belief graph on accept"
     )

@@ -294,7 +294,10 @@ def plan_chapter(
         + f"\nOPEN THREADS:\n{open_threads}\n{state}\n"
         "Write the chapter card. It is a contract, not prose. Every reveal you list will be "
         "written into the belief graph when the chapter is accepted, so list exactly the "
-        "information that changes hands and to whom. Break the chapter into 2–4 scenes with beats."
+        "information that changes hands and to whom. Break the chapter into 2–4 scenes with beats. "
+        "Also set `feel`: one or two sentences on what this chapter should feel like to read "
+        "(tone, pace, how it should land) — guidance for whoever drafts it, not something the "
+        "checker will verify."
     )
     card = structured(client, policy.model_for("plan"), ChapterCard, prompt=prompt,
                       max_tokens=8000, usage=usage, stage="plan:card")

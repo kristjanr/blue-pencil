@@ -371,7 +371,8 @@ def cmd_accept(args) -> int:
 
     client = _client_or_none(args.llm)
     result = accept_chapter(graph, profile, policy, draft, card=card, client=client,
-                            book=args.book or "", accepted_dir=ws.accepted, git=not args.no_git)
+                            book=args.book or "", accepted_dir=ws.accepted, git=not args.no_git,
+                            note=args.note or "")
     _echo(result.render())
     graph.close()
     return 0
@@ -708,6 +709,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--book", default=None)
     sp.add_argument("--llm", action="store_true", help="re-extract the accepted chapter (recommended)")
     sp.add_argument("--no-git", action="store_true")
+    sp.add_argument("--note", default=None,
+                    help="why you're accepting this — recorded in the graph, not just that you did")
     sp.set_defaults(func=cmd_accept)
 
     sp = sub.add_parser("state", help="what did X believe on date D — a checkout, not a guess")

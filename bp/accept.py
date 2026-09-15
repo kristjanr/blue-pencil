@@ -65,6 +65,7 @@ def accept_chapter(
     chapter: int | None = None,
     accepted_dir: Path | None = None,
     git: bool = True,
+    note: str = "",
 ) -> AcceptResult:
     result = AcceptResult()
     book = book or (card.book if card else "wip")
@@ -128,6 +129,10 @@ def accept_chapter(
                 "UPDATE threads SET last_scene=? WHERE thread_id=?",
                 (result.scene_ids[-1] if result.scene_ids else "", tid),
             )
+
+    if note.strip():
+        graph.write_editor_note(book=book, chapter=chapter, scene_ids=result.scene_ids, note=note.strip())
+        result.notes.append("editor's note recorded")
 
     graph.commit()
 

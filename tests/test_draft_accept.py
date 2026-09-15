@@ -1,5 +1,6 @@
 """Context packs and state commit — the parts that work without a model."""
 
+import json
 from types import SimpleNamespace
 
 from bp.accept import accept_chapter, state_before
@@ -36,6 +37,21 @@ def test_pack_orders_stable_material_first_for_caching(world):
     assert blocks[: len(pack.stable)] == pack.stable
     assert "engine" in pack.rules.lower() or "hard rules" in pack.rules.lower()
     assert pack.card_block.startswith("CHAPTER CARD")
+
+
+def test_scene_brief_surfaces_the_cards_feel_as_guidance(world):
+    """`feel` is prose guidance for the drafter, not a structural field the
+    card checker verifies — it belongs in the scene brief the drafter reads
+    right before writing, not buried only in the JSON contract dump."""
+    graph, profile = world
+    with_feel = _card()
+    with_feel.feel = "quiet, and ends badly"
+    pack = build_pack(graph, profile, RunPolicy.from_dict({}), with_feel)
+    assert "Should feel like: quiet, and ends badly" in pack.scene_brief
+
+    without_feel = _card()
+    pack2 = build_pack(graph, profile, RunPolicy.from_dict({}), without_feel)
+    assert "Should feel like" not in pack2.scene_brief
 
 
 def test_pack_respects_its_token_budget(world):
@@ -155,6 +171,35 @@ def test_accepted_reveal_is_known_by_its_recipient(world, tmp_path):
                    book="LW4", accepted_dir=tmp_path, git=False)
     k = KnowledgeGraph(graph).earliest_knowledge("LW4.ch01-R1", "Ana")
     assert k.reachable
+
+
+def test_accept_records_why_not_just_that(world, tmp_path):
+    """The bug this test exists for: accept_chapter committed a chapter to
+    canon but threw away any reasoning behind the decision. Over a whole book
+    that reasoning is the most valuable training signal in the system — it
+    must be persisted, not just logged to the terminal."""
+    graph, profile = world
+    draft = Draft.parse("Ana filed the chart.\n")
+    draft.meta = {"pov": "Ana", "date": "2185-01-01", "place": "Sol", "cast": ["Ana"]}
+    result = accept_chapter(graph, profile, RunPolicy.from_dict({}), draft, card=_card(),
+                            book="LW4", accepted_dir=tmp_path, git=False,
+                            note="always let her sign it dark; don't soften the ending")
+    assert "editor's note recorded" in result.notes
+
+    rows = graph.editor_notes(book="LW4")
+    assert len(rows) == 1
+    assert rows[0]["note"] == "always let her sign it dark; don't soften the ending"
+    assert rows[0]["chapter"] == 1
+    assert json.loads(rows[0]["scene_ids"]) == result.scene_ids
+
+
+def test_accept_without_a_note_records_nothing(world, tmp_path):
+    graph, profile = world
+    draft = Draft.parse("Ana filed the chart.\n")
+    draft.meta = {"pov": "Ana", "date": "2185-01-01", "place": "Sol", "cast": ["Ana"]}
+    accept_chapter(graph, profile, RunPolicy.from_dict({}), draft, card=_card(),
+                   book="LW4", accepted_dir=tmp_path, git=False)
+    assert graph.editor_notes(book="LW4") == []
 
 
 def test_state_before_is_a_checkout_not_a_guess(world):
