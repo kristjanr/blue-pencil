@@ -26,7 +26,7 @@ from typing import Any, Iterable, Sequence, Type, TypeVar
 
 from pydantic import BaseModel
 
-from .errors import NoCredentials, Refused
+from .errors import NoCredentials, NoStructuredOutput, Refused
 from .textstats import estimate_tokens
 
 T = TypeVar("T", bound=BaseModel)
@@ -313,15 +313,18 @@ def structured(
         model=model, prefix_tokens=schema_tokens(raw_schema),
     ) if system else []
 
-    def call():
+    def call(*, force: bool = False):
         kwargs: dict[str, Any] = dict(
             model=model,
             max_tokens=max_tokens,
             tools=[tool],
-            # Forced tool use (`{"type": "tool"}` / `{"type": "any"}`) is rejected
-            # with a 400 on the newest models — including the one `plan` runs on.
-            # `auto` plus an instruction naming the tool is the supported shape.
-            tool_choice={"type": "auto"},
+            # `auto` plus an instruction naming the tool is the default shape,
+            # because forced tool use (`{"type": "tool"}`) is rejected with a
+            # 400 on some models — including the one `plan` runs on. `force`
+            # is a last resort tried only after `auto` has already let the
+            # model decline; if the model rejects it too, the caller below
+            # catches that and reports the original decline instead.
+            tool_choice={"type": "tool", "name": tool["name"]} if force else {"type": "auto"},
             messages=[{"role": "user", "content":
                        f"{prompt}\n\nReply by calling the `emit` tool exactly once. "
                        f"Do not answer in prose."}],
@@ -349,10 +352,16 @@ def structured(
                 return block.input
         return None
 
-    if usage is not None:
-        usage.add(model, msg.usage, stage=stage)
-    if getattr(msg, "stop_reason", "") == "refusal":
-        raise Refused(f"{model} refused a structured request ({stage or 'unstaged'})")
+    def _record(m) -> None:
+        if usage is not None:
+            usage.add(model, m.usage, stage=stage)
+
+    def _check_refusal(m) -> None:
+        if getattr(m, "stop_reason", "") == "refusal":
+            raise Refused(f"{model} refused a structured request ({stage or 'unstaged'})")
+
+    _record(msg)
+    _check_refusal(msg)
 
     payload = _emitted(msg)
     if payload is None and tool is strict_tool:
@@ -362,11 +371,34 @@ def structured(
         # the loud case: drop to the plain tool and ask once more.
         tool = plain_tool
         msg = _retry(call)
-        if usage is not None:
-            usage.add(model, msg.usage, stage=stage)
+        _record(msg)
+        _check_refusal(msg)
         payload = _emitted(msg)
     if payload is None:
-        raise ValueError(f"{model} returned no structured output for {schema.__name__}")
+        # `auto` genuinely let the model answer in prose instead of the tool —
+        # seen on adjudication calls where the honest response is a clarifying
+        # question. Forcing the call is the same remedy extraction's batch
+        # path already relies on (`bp/extract.py` submits with a forced
+        # `tool_choice` and never hits this); it just is not the default here
+        # because some models 400 on a forced choice. Try it once, and if the
+        # model rejects the shape outright, fall through to the error below
+        # rather than lose the informative failure to a new exception.
+        try:
+            forced = _retry(lambda: call(force=True))
+        except Exception:
+            forced = None
+        if forced is not None:
+            msg = forced
+            _record(msg)
+            _check_refusal(msg)
+            payload = _emitted(msg)
+    if payload is None:
+        detail = _text_of(msg).strip()
+        raise NoStructuredOutput(
+            f"{model} returned no structured output for {schema.__name__} "
+            f"(stop_reason={getattr(msg, 'stop_reason', '?')!r})"
+            + (f" — said: {detail[:200]!r}" if detail else "")
+        )
     return schema.model_validate(payload)
 
 

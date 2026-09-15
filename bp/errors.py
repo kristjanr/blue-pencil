@@ -35,3 +35,12 @@ class NoCredentials(BluePencilError):
 
 class Refused(BluePencilError):
     """The model returned a ``refusal`` stop reason and no fallback succeeded."""
+
+
+class NoStructuredOutput(BluePencilError):
+    """A structured call ended with no ``tool_use`` block, even forced.
+
+    Distinct from :class:`Refused`: this is not a safety refusal, it is a model
+    that took ``tool_choice: auto`` at its word and answered in prose instead —
+    typically because the honest answer to the prompt is a clarifying question.
+    """
