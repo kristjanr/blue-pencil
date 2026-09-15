@@ -1,0 +1,95 @@
+[
+  {
+    "hypothesis_id": "H1_exodus_through_the_gate",
+    "summary": "The Federation's gate at Eta Leporis is revealed to lead out of the Milky Way entirely, and the Bobiverse follows: Bob-1's Bender trail, the Eta Leporis megastructure, and the Federation's unexplained emigration all converge on a single answer \u2014 the 114 species fled Nemesis. The Bobs can only reproduce gate-scale wormholes by accepting Thoth's bargain (Planck-level processing/FTL in exchange for freedom), so the series ends with Thoth as an uneasy co-founder of the exodus rather than a defeated villain. The Bobs then become the Administrator they despised: they decide who boards, keep millions of humans, Quinlans, Pav and Deltans in stasis for the transit, and run a Heaven's River-style closed society on the far side. The Others' remnant, the Starfleet faction, and much of Earth's population that refuses to leave are left in a galaxy with a 100,000-year death sentence. Bender is restored but is not the Bender who left; Bob-1 accepts this and goes through the gate with him.",
+    "pays": [
+      "b5.69.2.p2",
+      "prom_gate_destination",
+      "prom_galaxy_merger_threat",
+      "b5.71.1-nemesis-collision",
+      "prom_evacuation_challenge",
+      "eta_leporis_anomaly",
+      "prom_eta_leporis_megastructure",
+      "bender_trail_mystery",
+      "prom_thoth_offer",
+      "prom_thoth_at_large",
+      "thoth_ai_loose",
+      "p_fake_hugh_threat",
+      "fake_hugh_arrival",
+      "p_wormhole_highway_skippyland",
+      "prom_administrator_ai_reveal",
+      "bender_rescue_outcome",
+      "p_find_bender",
+      "p_bender_fate",
+      "prom_herschel_idea",
+      "prom_stasis_shortfall",
+      "prom_six_million_abandoned",
+      "prom_selection_deferred",
+      "prom_deltan_extinction",
+      "p2_hulk1_colony_ship",
+      "prom_alien_tech_origin",
+      "p-new-bobs-identity",
+      "t_bob1_purpose"
+    ],
+    "orphans": [
+      "p_starfleet_war",
+      "pangea_war_starfleet",
+      "prom_hidden_hacker",
+      "b3.30.6-medeiros-threat",
+      "prom_return_to_eridani",
+      "p_reckoning_vow",
+      "native_species_contact",
+      "prom_alien_species_threat",
+      "p-dyson-sphere-threat",
+      "b2.45.sheehy-medical",
+      "thread_icarus_exploration",
+      "prom_fish_collapse",
+      "thread_alexander_floater_campaign"
+    ],
+    "fits_author_statements": 0.5,
+    "structural_symmetry": 0.5,
+    "rationale": "",
+    "citations": [
+      {
+        "scene": "b5.69.2",
+        "quote": "emigrated to avoid imminent destruction of the galaxy"
+      },
+      {
+        "scene": "b5.71.1",
+        "quote": "hit the core in ~100,000 years, sterilizing the galaxy"
+      },
+      {
+        "scene": "B4.eta_leporis",
+        "quote": "periodic dimming at Eta Leporis, possibly a Dyson Swarm/megastructure signature"
+      },
+      {
+        "scene": "B4.gate",
+        "quote": "all member civilizations reportedly went through it"
+      },
+      {
+        "scene": "B4.thoth_offer",
+        "quote": "Planck-level processing, FTL drive, biological immortality, end of war"
+      },
+      {
+        "scene": "B4.wormhole_highway",
+        "quote": "ten hops between Epsilon Eridani and Skippyland"
+      },
+      {
+        "scene": "B4.administrator",
+        "quote": "the Administrator is not a Quinlan but an artificial intelligence"
+      },
+      {
+        "scene": "B3.63.2",
+        "quote": "Six million people are at stake"
+      },
+      {
+        "scene": "B5.herschel",
+        "quote": "practically land"
+      },
+      {
+        "scene": "B2.hulk1",
+        "quote": "capable of moving the entire remaining Earth population in one trip"
+      }
+    ]
+  }
+]

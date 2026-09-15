@@ -1,3 +1,5 @@
+# NOTE: verdicts are keyed by group NAME, not by position — an earlier draft
+# of this file mis-assigned Alexander to group 2 (which is Bill).
 # Human verdicts on ambiguous entity groups, from Kris's review of the 126 that
 # survived the mechanical merge. These are the test set for bp.resolve: an
 # adjudicator that cannot reproduce these is not trusted on the unlabelled rest.
@@ -9,7 +11,7 @@
 - group: the Bobs
   verdict: merge_all
 
-- group: Alexander
+- group: Alexander        # doc group 14 (ids: alexander, alexander_dragon, alexander_bobiverse)
   verdict: defect
   note: "no Bob copy named Alexander exists; the record is invented"
 
