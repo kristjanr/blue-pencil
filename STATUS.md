@@ -107,7 +107,30 @@ underneath item 1** — see "What the fix uncovered" below.
 | 5 | `structured()` fails on `resolve.py`'s `Verdict` schema | **fixed** — `tool_choice` was `auto`, so the model could answer in prose |
 | 6 | Term-grounding can't tell a name from a descriptor | open — don't gate on it; the quote half is exact and fine |
 | 7 | `bp ground` takes a write lock on open | open — can't run while an extract holds the DB |
-| 8 | Fabricated-**entity** detection ("Alexander", "Charlie") | open — same class as the 391 fabricated quotes |
+| 8 | Fabricated-**entity** detection ("Alexander", "Charlie") | **tried, reverted** — see below |
+
+### Item 8 — tried a name-existence check, it doesn't work
+
+Built `check_entity_existence`: flag an entity whose name (and every alias)
+appears in none of its cited scenes. Tested against the real graph before
+shipping it: **453 flagged, almost all false positives** — the extractor
+legitimately labels unnamed minor characters with descriptions ("Panel
+Moderator", "Rosie's mother", "Wagon Driver") that were never meant to be
+verbatim quotes. Restricting to `kind='character'` and filtering
+"unnamed"/possessive markers got it to 35, still dominated by the same
+problem (`"Bridget Brodeur"` is only ever called `"Bridget"` in the text —
+a real character, a false positive from checking the full name).
+
+Worse: it does not catch the motivating case. `"Alexander"` genuinely
+appears in the corpus — three different legitimate characters are named
+that. The actual defect is that the extractor *also* invented a fourth,
+a Bob-copy/replicant Alexander, conflating him with the others. That is a
+semantic identity judgment (same class as `"Charlie"`'s form contradiction),
+which is exactly what `resolve.py`'s `Verdict.defects` field is for.
+`resolve.py`'s `candidates()` already groups all three real "Alexander"
+records plus the invented one into one candidate — the adjudicator, once
+run, is the fabricated-entity detector. Reverted the check rather than ship
+something that would demote hundreds of legitimate records' confidence.
 
 ### What the fix uncovered — measured on the real graph, 2026-09-16
 
@@ -135,10 +158,11 @@ that produced 245 dangling citations), plus 4 with an empty `planted_in`.
 `_write_records` pins `citations` to the scene the request carried but not
 `planted_in`. Repair is mine to run once the pin lands.
 
-**Design requests forwarded** (the human currently has no way to *speak*, only to veto):
-1. `ChapterCard` should carry free-text **intent** ("what this chapter should feel like"), fed to the drafter.
-2. `bp check --serve` needs a **text box**, and the rejection reason must reach the reviser as first-class input. *Highest value — closes an open loop.*
-3. `accept` should record **why**, so the graph accumulates the editor's taste.
+**Design requests forwarded** (the human currently has no way to *speak*, only to veto) —
+**all three done 2026-09-16** (commits `da5ed2e`, `f6955a3`):
+1. ~~`ChapterCard` should carry free-text **intent**~~ — `card.feel`, surfaced in the scene brief the drafter reads, kept out of what the card checker verifies.
+2. ~~`bp check --serve` needs a **text box**~~ — `serve_review` now returns `(verdict, note)`; `revise()` takes `human_note` as an instruction to follow; `cmd_check` calls `revise()` itself on a "revise" verdict and writes `*.revised.md`.
+3. ~~`accept` should record **why**~~ — `bp accept --note "..."` persists to a new `editor_notes` table; `Graph.editor_notes()` reads it back.
 
 **Framing sent with them:** the software's output is not the book. It is a graph
 that knows what is true, a plan that aims at a chosen ending, and a checker that
