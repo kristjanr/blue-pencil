@@ -176,10 +176,22 @@ the agent working together; a draft is a first pass that survives checking.
 
 ## Entity groups deliberately left unmerged
 
-`Alexander` (fabricated), `Charlie` (records contradict), `Belinda` (different,
+`Charlie` (records contradict), `Belinda` (different,
 low confidence), `Guppy` (every replicant has one — same kind, maybe distinct
 instances), `Harvey` (different), `Survey Drone` (several genuinely exist),
 `Kevin`'s CryoEterna rep (the other two merged).
+
+**Correction, 2026-09-16: `Alexander` is not fabricated.** Verified against the
+corpus — the name appears in 26 scenes of book 5, and all four `character` records
+cite quotes that check out. They are one dragon warlord recorded four ways
+(`alexander_dragon`, `dragon_conqueror`, `alexander`, `alexander_bobiverse`) and
+should probably all merge. The thing Kris flagged was real but narrower: the
+*description* on `alexander_bobiverse` calls him "a Bob-copy", which is a category
+error — Alexander is a dragon; the Bobs in that storyline are Bridget and Howard.
+**A third failure class:** a true citation carrying a false description. Neither
+the fabricated-quote check nor `bp ground` can see it, because every term does
+appear in the cited scene. **Awaiting Kris's call on the four-way merge**, since it
+overrides a verdict he gave while reading that same wrong description.
 
 ## Decisions already made — don't re-litigate
 
