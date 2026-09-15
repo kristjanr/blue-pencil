@@ -34,7 +34,7 @@ from .models import (
 from .profile import SeriesProfile
 from .timeline import Span
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 PRAGMA journal_mode = WAL;
@@ -148,7 +148,11 @@ CREATE TABLE IF NOT EXISTS beliefs (
     as_of_text  TEXT DEFAULT '',
     as_of_day   REAL,
     detail      TEXT DEFAULT '',
-    confidence  REAL DEFAULT 1.0
+    confidence  REAL DEFAULT 1.0,
+    -- The scene this belief was read out of. Without it two beliefs about one
+    -- event are indistinguishable, and a disagreement between them cannot be
+    -- told from an extraction slip inside a single scene.
+    scene_id    TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_beliefs_char ON beliefs(character, event_id);
 
@@ -314,6 +318,7 @@ class Graph:
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.set_meta("schema_version", str(SCHEMA_VERSION))
         if profile is not None and profile.source:
             self.set_meta("profile", str(profile.source))
@@ -331,6 +336,18 @@ class Graph:
 
     def commit(self) -> None:
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Bring an older graph up to the current schema.
+
+        `CREATE TABLE IF NOT EXISTS` never alters a table that already exists,
+        so a graph built under an earlier version silently lacks new columns.
+        Each step is idempotent and additive: no rebuild, no data loss.
+        """
+        have = {r[1] for r in self.conn.execute("PRAGMA table_info(beliefs)")}
+        if have and "scene_id" not in have:
+            self.conn.execute("ALTER TABLE beliefs ADD COLUMN scene_id TEXT DEFAULT ''")
+            self.conn.commit()
 
     def set_meta(self, key: str, value: str) -> None:
         self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (key, value))
@@ -477,10 +494,12 @@ class Graph:
         for b in ev.beliefs:
             as_of = self._span(b.as_of)
             self.conn.execute(
-                """INSERT INTO beliefs(event_id,character,state,as_of_text,as_of_day,detail,confidence)
-                   VALUES(?,?,?,?,?,?,?)""",
+                """INSERT INTO beliefs(event_id,character,state,as_of_text,as_of_day,detail,
+                                         confidence,scene_id)
+                   VALUES(?,?,?,?,?,?,?,?)""",
                 (ev.event_id, self._canon(b.character), b.state, b.as_of,
-                 as_of.lo if as_of else None, b.detail, b.confidence),
+                 as_of.lo if as_of else None, b.detail, b.confidence,
+                 ev.citations[0].scene if ev.citations else ""),
             )
 
         self.conn.execute("DELETE FROM consequences WHERE event_id=?", (ev.event_id,))

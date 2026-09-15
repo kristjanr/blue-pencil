@@ -540,39 +540,77 @@ def prune(graph: Graph, profile: SeriesProfile, report: ExtractReport) -> None:
             ))
             report.contradictions += 1
 
-    # Belief records that disagree about the same character and event.
+    # Belief records that disagree about the same character and event — but only
+    # when the two readings come from DIFFERENT scenes. Two conflicting states
+    # extracted from one scene are an extraction slip, not the series being coy;
+    # recording them as open contradictions buries the real ones in noise.
     for row in graph.conn.execute(
-        """SELECT event_id, character, GROUP_CONCAT(DISTINCT state) AS states
-           FROM beliefs GROUP BY event_id, character HAVING COUNT(DISTINCT state) > 1"""
+        """SELECT event_id, character FROM beliefs
+           GROUP BY event_id, character HAVING COUNT(DISTINCT state) > 1"""
     ):
-        states = row["states"].split(",")
-        if {"knows", "unaware"} <= set(states) or "believes_false" in states:
-            cid = f"C-bel-{row['event_id']}-{row['character']}"
-            graph.write_contradiction(Contradiction(
-                contradiction_id=cid,
-                subject=f"{row['character']}'s belief about {row['event_id']}",
-                reading_a=states[0], reading_b=", ".join(states[1:]),
-                citations_a=graph.citations_for("event", row["event_id"]),
-                note=("kept open: in a series with unreliable narrators, a character recorded as "
-                      "both knowing and unaware is often the point rather than an error"),
-            ))
-            report.contradictions += 1
+        rows = graph.conn.execute(
+            "SELECT state, scene_id FROM beliefs WHERE event_id=? AND character=?",
+            (row["event_id"], row["character"]),
+        ).fetchall()
+        by_scene: dict[str, set[str]] = {}
+        for r in rows:
+            if r["scene_id"]:
+                by_scene.setdefault(r["scene_id"], set()).add(r["state"])
+        if len(by_scene) < 2:
+            continue
+        states = {st for sts in by_scene.values() for st in sts}
+        if not ({"knows", "unaware"} <= states or "believes_false" in states):
+            continue
+        (scene_a, states_a), (scene_b, states_b) = sorted(by_scene.items())[:2]
+        if states_a == states_b:
+            continue
+        cites = graph.citations_for("event", row["event_id"])
+        cites_a = [c for c in cites if c.scene == scene_a]
+        cites_b = [c for c in cites if c.scene == scene_b]
+        if not cites_a or not cites_b:
+            continue                      # an uncited disagreement is a guess, not a contradiction
+        cid = f"C-bel-{row['event_id']}-{row['character']}"
+        graph.write_contradiction(Contradiction(
+            contradiction_id=cid,
+            subject=f"{row['character']}'s belief about {row['event_id']}",
+            reading_a=f"{', '.join(sorted(states_a))} (in {scene_a})",
+            reading_b=f"{', '.join(sorted(states_b))} (in {scene_b})",
+            citations_a=cites_a, citations_b=cites_b,
+            note=("kept open: in a series with unreliable narrators, a character recorded as "
+                  "both knowing and unaware is often the point rather than an error"),
+        ))
+        report.contradictions += 1
 
-    # A character recorded dead who later participates in an event.
+    # A character recorded dead who later ACTS. Being named in a later scene is
+    # not acting — the dead get talked about, remembered and mourned, and the
+    # extractor lists them among an event's participants when they do. Requiring
+    # the entity to have observed the event is what separates agency from mention.
     for ent in graph.conn.execute("SELECT entity_id, name FROM entities WHERE status='dead'"):
-        later = graph.conn.execute(
-            """SELECT event_id, summary FROM events
-               WHERE participants LIKE ? ORDER BY day_lo DESC LIMIT 1""",
+        later = None
+        for cand in graph.conn.execute(
+            """SELECT event_id, summary, observed_by FROM events
+               WHERE participants LIKE ? ORDER BY day_lo DESC""",
             (f'%"{ent["entity_id"]}"%',),
-        ).fetchone()
+        ):
+            try:
+                observers = json.loads(cand["observed_by"] or "[]")
+            except ValueError:
+                observers = []
+            if ent["entity_id"] in observers:
+                later = cand
+                break
         if later is None:
+            continue
+        cites_a = graph.citations_for("entity", ent["entity_id"])
+        cites_b = graph.citations_for("event", later["event_id"])
+        if not cites_a or not cites_b:
             continue
         cid = f"C-dead-{ent['entity_id']}"
         graph.write_contradiction(Contradiction(
             contradiction_id=cid, subject=f"{ent['name']} is recorded dead but acts later",
             reading_a="dead (entity record)",
-            reading_b=f"participates in {later['event_id']}: {later['summary']}",
-            citations_a=graph.citations_for("entity", ent["entity_id"]),
+            reading_b=f"observes {later['event_id']}: {later['summary']}",
+            citations_a=cites_a, citations_b=cites_b,
             note="if the series allows restoration, set entities.revivable in the profile",
         ))
         report.contradictions += 1
