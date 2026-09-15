@@ -4,7 +4,7 @@ Living status for the Bobiverse fan-continuation project. Background and the
 engine's design live in [HANDOVER.md](HANDOVER.md) and [README.md](README.md);
 this file is only *current state, who has what, and what happens next*.
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 
 ---
 
@@ -92,16 +92,48 @@ requiring both readings cited; `prune` never merging entities at all.
 
 **Open items handed over:**
 
-| # | item | why it matters |
+`blue-pencil-3c` reported items 1, 3, 4 and 5 fixed on 2026-09-16 (commits
+`27ff3d8`, `092d110`, `8a1371c`) and moved on to the three design features.
+Verified here against the real graph: 152 tests pass, the units bug is genuinely
+gone, the `entity_merges` table migrates. **But two larger defects were sitting
+underneath item 1** — see "What the fix uncovered" below.
+
+| # | item | state |
 |---|---|---|
-| 1 | `evidence_score` units bug — `paid / total_weight` divides a **count** by a **summed weight** | Ranking is **96% the model's self-assessment**. Measured: evidence term 0.0081 vs self-score 0.2000. Defeats the project's central claim. |
-| 2 | Planner sees 120 of 2,842 promises (hardcoded `[:120]`), 60 of 1,865 threads | A thesis is proposed against 4% of the ledger. Compounds with #1 and hides it. |
-| 3 | `-n` not honoured — asked for 2 hypotheses, got 1 | |
-| 4 | Entity merges drop the absorbed **id** (keep only the name) | After merging, old ids no longer resolve. |
-| 5 | `structured()` fails on `bp/resolve.py`'s `Verdict` schema | **Narrow, not a shared-path defect** — `bp plan` goes through the same path fine. Earlier alarm corrected. |
-| 6 | Term-grounding half of `bp ground` can't tell a name from a descriptor | Flags `unnamed`/`unknown`/`investigation`. Don't gate on it. Quote half is exact and fine. |
-| 7 | `bp ground` takes a write lock on open (stamps schema_version) | Can't run while an extract holds the DB. |
-| 8 | Fabricated-**entity** detection | Kris found "Alexander" (doesn't exist) and "Charlie" (two records contradicting on an invariant fact). Same class as the 391 fabricated quotes. |
+| 1 | `evidence_score` units bug — a **count** divided by a **summed weight** | **fixed** — but the term still has no range; see A below |
+| 2 | Planner sees 120 of 2,842 promises, 60 of 1,865 threads | **open** — now the binding constraint; see A |
+| 3 | `-n` not honoured — asked for 2 hypotheses, got 1 | **fixed** — asks once more for the shortfall |
+| 4 | Entity merges drop the absorbed **id** | **fixed** — new `entity_merges` table. Retroactively empty here: this graph's 270 merges predate it, so those ids stay unrecoverable |
+| 5 | `structured()` fails on `resolve.py`'s `Verdict` schema | **fixed** — `tool_choice` was `auto`, so the model could answer in prose |
+| 6 | Term-grounding can't tell a name from a descriptor | open — don't gate on it; the quote half is exact and fine |
+| 7 | `bp ground` takes a write lock on open | open — can't run while an extract holds the DB |
+| 8 | Fabricated-**entity** detection ("Alexander", "Charlie") | open — same class as the 391 fabricated quotes |
+
+### What the fix uncovered — measured on the real graph, 2026-09-16
+
+**A. The evidence term still can't discriminate.** The prompt shows the top 120
+open promises by weight: 4.2% of the 2,842 open promises, carrying 6.8% of their
+total weight (102.7 of 1514.3). Coverage is divided by the weight of *all* open
+promises, so a thesis that paid off **every promise it was shown** scores coverage
+0.068 → an evidence term of ~0.041, against a self-report term reaching 0.40.
+**The ranking is ~90% self-report even at its ceiling.** The saved thesis measures
+0.0119 evidence vs 0.2000 self-report. Suggested fix: normalise coverage against
+the weight actually *offered* to the model, not the whole ledger.
+
+**B. Nothing ever closes a promise.** 2,842 open / 41 paid / 3 abandoned, of 2,886.
+Threads: 1,865 open / 51 dormant / 51 closed, of 1,967. Across five *finished*
+books, 98.6% of promises are recorded as never paid off — there is no pass that
+settles a ledger entry when later text cashes it. This is why A bites: the
+denominator is inflated by roughly the whole corpus, and the planner's window is
+filled with setups book 3 already resolved. **Book 6 is being planned around dead
+material.** Needs a "settle the ledger" pass over books 1–5 before any thesis
+ranking is trusted. This is the biggest open item in the project.
+
+**C. `planted_in` was never pinned the way citations were.** 46 promises point at
+a scene id that does not exist (`book5.15.3`, `B2.66.1` — the same reformatting
+that produced 245 dangling citations), plus 4 with an empty `planted_in`.
+`_write_records` pins `citations` to the scene the request carried but not
+`planted_in`. Repair is mine to run once the pin lands.
 
 **Design requests forwarded** (the human currently has no way to *speak*, only to veto):
 1. `ChapterCard` should carry free-text **intent** ("what this chapter should feel like"), fed to the drafter.
@@ -142,8 +174,10 @@ instances), `Harvey` (different), `Survey Drone` (several genuinely exist),
 2. **Step 1 of the ladder** — real book 6 through the checkers, count false alarms.
 3. **Step 2** — planted errors, measure recall.
 4. **Step 3** — `real_shape()` calibration rulers.
-5. Wait for `evidence_score` fix before trusting any thesis ranking — the thesis
-   sets the destination every later chapter aims at.
+5. Do **not** trust a thesis ranking until finding **B** (the unsettled ledger)
+   and finding **A** (coverage normalised to what the model was shown) are both
+   fixed. The `evidence_score` arithmetic fix alone is not enough. The thesis sets
+   the destination every later chapter aims at.
 6. **Step 4** — generate fake book 6 hands-off, score against the rulers.
 7. Then book 7, with Kris fully in the loop.
 
