@@ -94,6 +94,7 @@ class ExtractReport:
     fields_dropped: int = 0
     records_salvaged: int = 0
     unwrapped_json: int = 0
+    entities_merged: int = 0
     errors: list[str] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
     passes_done: list[str] = field(default_factory=list)
@@ -106,6 +107,7 @@ class ExtractReport:
             f"(reports {self.reports}, beliefs {self.beliefs})",
             f"objects {self.objects} · promises {self.promises} · threads {self.threads}",
             f"contradictions kept open: {self.contradictions}",
+            f"duplicate entity records merged: {self.entities_merged}",
             f"records rejected for having no citation: {self.rejected_uncited}",
             f"citations re-pinned to the scene they came from: {self.citations_repinned}",
             f"salvaged: {self.fields_dropped} unknown fields dropped, "
@@ -486,6 +488,85 @@ def _run_batch(graph, profile, client, model, pass_name, schema, scene_rows, rep
 
 
 # ----------------------------------------------------------------------- prune
+def _norm_name(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def _id_key(s: str) -> str:
+    """An entity id with its separators removed.
+
+    The model picks a hyphen in one scene and an underscore in the next, so
+    `dr_carlisle` and `dr-carlisle` are one character written twice. Collapsing
+    separators is the whole of the test — it deliberately will NOT merge
+    `kevin_dungeon_npc` with `kevin_cryoeterna_rep`, because those ids carry
+    real distinguishing information and are probably two different people.
+    Name identity is not entity identity.
+    """
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+def _merge_entities(graph: Graph, report: "ExtractReport") -> int:
+    """Collapse entity records that differ only in how their id was punctuated."""
+    rows = [dict(r) for r in graph.conn.execute(
+        "SELECT entity_id, name, kind, aliases, description, status, substrate, parent_id "
+        "FROM entities")]
+    cites = {r[0]: r[1] for r in graph.conn.execute(
+        "SELECT record_id, COUNT(*) FROM citations WHERE record_kind='entity' GROUP BY record_id")}
+
+    groups: dict[tuple, list] = {}
+    for r in rows:
+        groups.setdefault((_id_key(r["entity_id"]), r["kind"], _norm_name(r["name"])), []).append(r)
+
+    merged = 0
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        # Keep the best-attested record: most citations, then the fullest description.
+        members.sort(key=lambda r: (cites.get(r["entity_id"], 0), len(r["description"] or "")),
+                     reverse=True)
+        keeper, losers = members[0], members[1:]
+
+        alias = set()
+        for r in members:
+            try:
+                alias.update(json.loads(r["aliases"] or "[]"))
+            except ValueError:
+                pass
+        alias.update(r["name"] for r in losers)
+        alias.discard(keeper["name"])
+        best_desc = max((r["description"] or "" for r in members), key=len)
+        graph.conn.execute(
+            "UPDATE entities SET aliases=?, description=? WHERE entity_id=?",
+            (json.dumps(sorted(alias)), best_desc, keeper["entity_id"]))
+
+        for r in losers:
+            old, new = r["entity_id"], keeper["entity_id"]
+            graph.conn.execute(
+                "UPDATE citations SET record_id=? WHERE record_kind='entity' AND record_id=?",
+                (new, old))
+            graph.conn.execute("UPDATE entities SET parent_id=? WHERE parent_id=?", (new, old))
+            graph.conn.execute("UPDATE objects SET holder=? WHERE holder=?", (new, old))
+            # JSON id lists have to be rewritten element-wise, not string-replaced:
+            # a substring swap would corrupt any id that contains another as a prefix.
+            for table, col, idcol in (("events", "participants", "event_id"),
+                                      ("events", "observed_by", "event_id"),
+                                      ("threads", "characters", "thread_id")):
+                for row in graph.conn.execute(
+                        f"SELECT {idcol}, {col} FROM {table} WHERE {col} LIKE ?", (f'%"{old}"%',)):
+                    try:
+                        ids = json.loads(row[col] or "[]")
+                    except ValueError:
+                        continue
+                    swapped = [new if x == old else x for x in ids]
+                    seen_ids = list(dict.fromkeys(swapped))
+                    graph.conn.execute(f"UPDATE {table} SET {col}=? WHERE {idcol}=?",
+                                       (json.dumps(seen_ids), row[idcol]))
+            graph.conn.execute("DELETE FROM entities WHERE entity_id=?", (old,))
+            merged += 1
+    report.entities_merged = merged
+    return merged
+
+
 def prune(graph: Graph, profile: SeriesProfile, report: ExtractReport) -> None:
     """Second pass: merge duplicates and open a contradiction record for conflicts.
 
@@ -495,6 +576,8 @@ def prune(graph: Graph, profile: SeriesProfile, report: ExtractReport) -> None:
     dead, an object in two places on the same day. Those are the conflicts worth
     surfacing, and none of them needs a model.
     """
+    _merge_entities(graph, report)
+
     # Duplicate events: same normalised summary, same place, overlapping date.
     seen: dict[tuple, str] = {}
     for row in graph.events():

@@ -85,3 +85,73 @@ def test_audit_sample_is_reproducible(world):
     b = audit_sample(graph, 10, seed=7)
     assert a == b and len(a) == 10
     assert all(row["scene"] for row in a)
+
+
+def test_separator_only_duplicates_merge(world):
+    """`dr_carlisle` and `dr-carlisle` are one character written twice."""
+    from bp.models import Entity
+
+    graph, profile = world
+    scene = graph.scenes()[0].scene_id
+    for eid, desc in (("dr_carlisle", "the ship's doctor"), ("dr-carlisle", "")):
+        graph.write_entity(Entity(entity_id=eid, name="Dr Carlisle", kind="character",
+                                  description=desc,
+                                  citations=[Citation(scene=scene, quote="q")]))
+    graph.commit()
+
+    report = ExtractReport()
+    prune(graph, profile, report)
+    left = [r[0] for r in graph.conn.execute(
+        "SELECT entity_id FROM entities WHERE entity_id IN ('dr_carlisle','dr-carlisle')")]
+    assert len(left) == 1, "one record should survive"
+    assert report.entities_merged >= 1
+    # the surviving record keeps the description that actually said something
+    desc = graph.conn.execute(
+        "SELECT description FROM entities WHERE entity_id=?", (left[0],)).fetchone()[0]
+    assert desc == "the ship's doctor"
+
+
+def test_distinguishing_ids_are_left_alone(world):
+    """Two people sharing a first name must not be merged into one."""
+    from bp.models import Entity
+
+    graph, profile = world
+    scene = graph.scenes()[0].scene_id
+    for eid in ("kevin_dungeon_npc", "kevin_cryoeterna_rep"):
+        graph.write_entity(Entity(entity_id=eid, name="Kevin", kind="character",
+                                  citations=[Citation(scene=scene, quote="q")]))
+    graph.commit()
+
+    prune(graph, profile, ExtractReport())
+    left = [r[0] for r in graph.conn.execute(
+        "SELECT entity_id FROM entities WHERE entity_id LIKE 'kevin%'")]
+    assert len(left) == 2, "name identity is not entity identity"
+
+
+def test_merge_repoints_every_reference(world):
+    """A merge that leaves a dangling id is worse than no merge."""
+    from bp.models import Entity
+
+    graph, profile = world
+    scene = graph.scenes()[0].scene_id
+    for eid in ("ship_alpha", "ship-alpha"):
+        graph.write_entity(Entity(entity_id=eid, name="Alpha", kind="ship",
+                                  citations=[Citation(scene=scene, quote="q")]))
+    graph.write_event(Event(
+        event_id="E-ref", summary="alpha arrives", when="2186-01-01", where="Sol",
+        participants=["ship-alpha"], observed_by=["ship-alpha"],
+        citations=[Citation(scene=scene, quote="q")]))
+    graph.commit()
+
+    prune(graph, profile, ExtractReport())
+    keeper = graph.conn.execute(
+        "SELECT entity_id FROM entities WHERE entity_id IN ('ship_alpha','ship-alpha')").fetchone()[0]
+    row = graph.conn.execute(
+        "SELECT participants, observed_by FROM events WHERE event_id='E-ref'").fetchone()
+    import json as _json
+    assert _json.loads(row["participants"]) == [keeper]
+    assert _json.loads(row["observed_by"]) == [keeper]
+    orphans = graph.conn.execute(
+        "SELECT COUNT(*) FROM citations WHERE record_kind='entity' AND record_id NOT IN "
+        "(SELECT entity_id FROM entities)").fetchone()[0]
+    assert orphans == 0
