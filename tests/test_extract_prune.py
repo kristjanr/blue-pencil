@@ -155,3 +155,56 @@ def test_merge_repoints_every_reference(world):
         "SELECT COUNT(*) FROM citations WHERE record_kind='entity' AND record_id NOT IN "
         "(SELECT entity_id FROM entities)").fetchone()[0]
     assert orphans == 0
+
+
+def test_the_absorbed_id_still_resolves_after_a_merge(world):
+    """The bug this test exists for: a merge rewrites every reference INSIDE
+    the graph and then deletes the loser's row, but anything holding the old
+    id from OUTSIDE the graph -- a citation in someone's notes, an eval
+    fixture -- has nowhere left to look it up. `resolve_entity_id` and
+    `entity()` must still find the merged-away id."""
+    from bp.models import Entity
+
+    graph, profile = world
+    scene = graph.scenes()[0].scene_id
+    for eid in ("ship_alpha", "ship-alpha"):
+        graph.write_entity(Entity(entity_id=eid, name="Alpha", kind="ship",
+                                  citations=[Citation(scene=scene, quote="q")]))
+    graph.commit()
+
+    prune(graph, profile, ExtractReport())
+    keeper = graph.conn.execute(
+        "SELECT entity_id FROM entities WHERE entity_id IN ('ship_alpha','ship-alpha')").fetchone()[0]
+    loser = "ship_alpha" if keeper == "ship-alpha" else "ship-alpha"
+
+    assert graph.resolve_entity_id(loser) == keeper
+    assert graph.resolve_entity_id(keeper) == keeper, "an id that was never merged resolves to itself"
+    assert graph.resolve_entity_id("never-existed") == "never-existed"
+    assert graph.entity(loser)["entity_id"] == keeper
+
+
+def test_resolve_entity_id_follows_a_chain_of_merges(world):
+    """A twice-merged id (A -> B -> C) must resolve straight to the final,
+    still-live id, not stop one hop short."""
+    graph, _ = world
+    graph.conn.execute("INSERT INTO entity_merges (old_id, new_id) VALUES ('a', 'b')")
+    graph.conn.execute("INSERT INTO entity_merges (old_id, new_id) VALUES ('b', 'c')")
+    graph.commit()
+    assert graph.resolve_entity_id("a") == "c"
+
+
+def test_resolve_entity_id_does_not_loop_forever_on_a_cycle():
+    """Merge chains should never cycle, but a defensive lookup must not hang
+    if bad data ever makes one."""
+    import tempfile
+    from pathlib import Path
+
+    from bp.db import Graph
+
+    with tempfile.TemporaryDirectory() as tmp:
+        graph = Graph(Path(tmp) / "cycle.sqlite")
+        graph.conn.execute("INSERT INTO entity_merges (old_id, new_id) VALUES ('a', 'b')")
+        graph.conn.execute("INSERT INTO entity_merges (old_id, new_id) VALUES ('b', 'a')")
+        graph.commit()
+        assert graph.resolve_entity_id("a") in ("a", "b")
+        graph.close()

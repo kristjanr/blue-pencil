@@ -266,6 +266,16 @@ CREATE TABLE IF NOT EXISTS phrase_ledger (
     ord         INTEGER,
     PRIMARY KEY (phrase, scene_id)
 );
+
+-- An entity merge deletes `old_id` after rewriting every in-graph reference to
+-- `new_id`, which is right for the graph's own foreign keys but leaves nothing
+-- for an OUTSIDE reference to redirect through -- a citation kept in someone's
+-- notes, an eval fixture, a URL. This table is that redirect, kept forever.
+CREATE TABLE IF NOT EXISTS entity_merges (
+    old_id      TEXT PRIMARY KEY,
+    new_id      TEXT NOT NULL,
+    merged_at   TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -670,9 +680,36 @@ class Graph:
 
     def entity(self, name: str) -> sqlite3.Row | None:
         canon = self._canon(name)
-        return self.conn.execute(
+        row = self.conn.execute(
             "SELECT * FROM entities WHERE entity_id=? OR name=? COLLATE NOCASE", (canon, canon)
         ).fetchone()
+        if row is not None:
+            return row
+        resolved = self.resolve_entity_id(canon)
+        if resolved == canon:
+            return None
+        return self.conn.execute("SELECT * FROM entities WHERE entity_id=?", (resolved,)).fetchone()
+
+    def resolve_entity_id(self, entity_id: str) -> str:
+        """Follow a chain of entity merges to the id that is still live.
+
+        A merge deletes the loser's row after rewriting the graph's own
+        references (citations, participants, holders, ...), so nothing
+        inside the graph needs the old id any more. Outside the graph is a
+        different story -- a citation kept in someone's notes, an eval
+        fixture, a URL -- so every merge is recorded here as a permanent
+        redirect. Returns ``entity_id`` unchanged if it was never merged
+        (including if it never existed).
+        """
+        seen = {entity_id}
+        current = entity_id
+        while True:
+            row = self.conn.execute(
+                "SELECT new_id FROM entity_merges WHERE old_id=?", (current,)).fetchone()
+            if row is None or row["new_id"] in seen:
+                return current
+            current = row["new_id"]
+            seen.add(current)
 
     def promises(self, status: str | None = None) -> list[sqlite3.Row]:
         if status:

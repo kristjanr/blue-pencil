@@ -561,6 +561,11 @@ def _merge_entities(graph: Graph, report: "ExtractReport") -> int:
                     seen_ids = list(dict.fromkeys(swapped))
                     graph.conn.execute(f"UPDATE {table} SET {col}=? WHERE {idcol}=?",
                                        (json.dumps(seen_ids), row[idcol]))
+            # The graph's own references are all rewritten above, but a
+            # citation kept outside it -- notes, an eval fixture, a URL --
+            # still names `old`, so record the redirect before the row is gone.
+            graph.conn.execute(
+                "INSERT OR REPLACE INTO entity_merges (old_id, new_id) VALUES (?, ?)", (old, new))
             graph.conn.execute("DELETE FROM entities WHERE entity_id=?", (old,))
             merged += 1
     report.entities_merged = merged
