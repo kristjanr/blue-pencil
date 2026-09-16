@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 _PUNCT = re.compile(r"[^a-z0-9]+")
 
@@ -227,3 +228,81 @@ def adjudicate(client, model: str, c: Candidate, graph, *, usage=None) -> Verdic
     return structured(client, model, Verdict, system=ADJUDICATE_SYSTEM,
                       prompt=_render_group(c, graph), max_tokens=4_000,
                       usage=usage, stage="resolve:adjudicate")
+
+
+# ----------------------------------------------------------------- applying
+@dataclass
+class ApplyReport:
+    """What applying a verdicts file did, or would do."""
+
+    groups: int = 0
+    absorbed: int = 0
+    skipped: list[str] = field(default_factory=list)
+    planned: list[tuple[str, list[str]]] = field(default_factory=list)
+
+    def render(self) -> str:
+        lines = [f"{self.groups} merge group(s) · {self.absorbed} record(s) absorbed"]
+        for keeper, losers in self.planned:
+            lines.append(f"  {keeper} <- {', '.join(losers)}")
+        for note in self.skipped:
+            lines.append(f"  skipped: {note}")
+        return "\n".join(lines)
+
+
+def load_verdicts(path) -> list[tuple[str, list[str]]]:
+    """Read a verdicts file into (keeper, losers) pairs.
+
+    Only ``merge`` and ``partition`` entries move anything. ``split`` says the
+    records are different people and ``hold`` says a human has not decided —
+    both are deliberately no-ops here, because the standing rule is that a
+    merge needs positive evidence and silence is not evidence.
+
+    A ``partition`` entry carries ``leave_alone`` beside its ``absorb`` list;
+    those ids are simply not absorbed, so they need no handling beyond being
+    left out.
+    """
+    import yaml
+
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    out: list[tuple[str, list[str]]] = []
+    for section in ("merge", "partition"):
+        for entry in data.get(section) or []:
+            keeper = (entry or {}).get("keep")
+            losers = [x for x in ((entry or {}).get("absorb") or []) if x]
+            if keeper and losers:
+                out.append((keeper, losers))
+    return out
+
+
+def apply_verdicts(graph, path, *, apply: bool = False) -> ApplyReport:
+    """Apply a verdicts file's merges to the graph.
+
+    Dry by default: a merge deletes records, and the standing rule is that a
+    wrong merge is the expensive mistake — it destroys a distinction with no
+    trace left to audit. Seeing the plan before it runs is cheap.
+    """
+    from .extract import merge_group
+
+    report = ApplyReport()
+    for keeper, losers in load_verdicts(path):
+        live = [
+            lid for lid in losers
+            if graph.conn.execute(
+                "SELECT 1 FROM entities WHERE entity_id=?", (lid,)).fetchone()
+        ]
+        if not live:
+            report.skipped.append(f"{keeper}: every record already absorbed")
+            continue
+        if graph.conn.execute(
+                "SELECT 1 FROM entities WHERE entity_id=?", (keeper,)).fetchone() is None:
+            report.skipped.append(f"{keeper}: keeper is not an entity in this graph")
+            continue
+        report.groups += 1
+        report.planned.append((keeper, live))
+        if apply:
+            report.absorbed += merge_group(graph, keeper, live)
+        else:
+            report.absorbed += len(live)
+    if apply:
+        graph.conn.commit()
+    return report

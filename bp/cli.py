@@ -139,6 +139,49 @@ def cmd_ground(args) -> int:
     return 1 if (report.quote_missing or report.ungrounded) else 0
 
 
+def cmd_resolve(args) -> int:
+    from .resolve import apply_verdicts, candidates
+
+    ws = Workspace.find()
+    profile = ws.load_profile(args.profile)
+    graph = ws.open_graph(profile, db=args.db)
+
+    if args.what == "candidates":
+        groups = candidates(graph)
+        _echo(f"{len(groups)} candidate group(s) — records some signal says may be one entity")
+        for c in groups[: args.limit]:
+            _echo(f"  [{', '.join(sorted(c.reasons)) or 'grouped'}] {len(c.members)} records")
+            for m in sorted(c.members, key=lambda r: r["entity_id"]):
+                _echo(f"      {m['entity_id']:36} {m['name']}")
+    elif args.what == "adjudicate":
+        from .llm import Usage
+        from .resolve import adjudicate
+
+        client = _client_or_none(True)
+        usage = Usage()
+        model = args.model or ws.load_policy(args.run).model_for("judge")
+        groups = candidates(graph)[: args.limit]
+        _echo(f"adjudicating {len(groups)} group(s) on {model}")
+        for c in groups:
+            v = adjudicate(client, model, c, graph, usage=usage)
+            _echo(f"\n  {len(c.members)} records · needs_scene_text={v.needs_scene_text}")
+            for cl in v.clusters:
+                _echo(f"    one entity: {', '.join(cl.entity_ids)} — {cl.reason}")
+            for d in v.defects:
+                _echo(f"    DEFECT {d.entity_id}: {d.problem}")
+        _echo(f"\n{usage.render()}")
+    elif args.what == "apply":
+        if not args.verdicts:
+            _echo("--verdicts FILE is required for `bp resolve apply`")
+            return 1
+        report = apply_verdicts(graph, args.verdicts, apply=args.apply)
+        _echo(report.render())
+        if not args.apply:
+            _echo("\ndry run — nothing written. Re-run with --apply to merge.")
+    graph.close()
+    return 0
+
+
 def cmd_cast(args) -> int:
     from .extract import rebuild_scene_cast
 
@@ -675,6 +718,15 @@ def build_parser() -> argparse.ArgumentParser:
                     help="mark records whose quote cannot be found as inferred, confidence 0.5")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_ground)
+
+    sp = sub.add_parser("resolve", help="entity resolution: candidates, adjudication, applying verdicts")
+    common(sp, run=True)
+    sp.add_argument("what", choices=["candidates", "adjudicate", "apply"])
+    sp.add_argument("--verdicts", default=None, help="verdicts YAML to apply")
+    sp.add_argument("--apply", action="store_true", help="write the merges; default is a dry run")
+    sp.add_argument("--limit", type=int, default=25)
+    sp.add_argument("--model", default=None)
+    sp.set_defaults(func=cmd_resolve)
 
     sp = sub.add_parser("cast", help="rebuild scene cast from cited events (no model, no cost)")
     common(sp)

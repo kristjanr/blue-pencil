@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Sequence
 
 from pydantic import BaseModel, ValidationError
 
@@ -526,49 +526,88 @@ def _merge_entities(graph: Graph, report: "ExtractReport") -> int:
                      reverse=True)
         keeper, losers = members[0], members[1:]
 
-        alias = set()
-        for r in members:
-            try:
-                alias.update(json.loads(r["aliases"] or "[]"))
-            except ValueError:
-                pass
-        alias.update(r["name"] for r in losers)
-        alias.discard(keeper["name"])
-        best_desc = max((r["description"] or "" for r in members), key=len)
-        graph.conn.execute(
-            "UPDATE entities SET aliases=?, description=? WHERE entity_id=?",
-            (json.dumps(sorted(alias)), best_desc, keeper["entity_id"]))
-
-        for r in losers:
-            old, new = r["entity_id"], keeper["entity_id"]
-            graph.conn.execute(
-                "UPDATE citations SET record_id=? WHERE record_kind='entity' AND record_id=?",
-                (new, old))
-            graph.conn.execute("UPDATE entities SET parent_id=? WHERE parent_id=?", (new, old))
-            graph.conn.execute("UPDATE objects SET holder=? WHERE holder=?", (new, old))
-            # JSON id lists have to be rewritten element-wise, not string-replaced:
-            # a substring swap would corrupt any id that contains another as a prefix.
-            for table, col, idcol in (("events", "participants", "event_id"),
-                                      ("events", "observed_by", "event_id"),
-                                      ("threads", "characters", "thread_id")):
-                for row in graph.conn.execute(
-                        f"SELECT {idcol}, {col} FROM {table} WHERE {col} LIKE ?", (f'%"{old}"%',)):
-                    try:
-                        ids = json.loads(row[col] or "[]")
-                    except ValueError:
-                        continue
-                    swapped = [new if x == old else x for x in ids]
-                    seen_ids = list(dict.fromkeys(swapped))
-                    graph.conn.execute(f"UPDATE {table} SET {col}=? WHERE {idcol}=?",
-                                       (json.dumps(seen_ids), row[idcol]))
-            # The graph's own references are all rewritten above, but a
-            # citation kept outside it -- notes, an eval fixture, a URL --
-            # still names `old`, so record the redirect before the row is gone.
-            graph.conn.execute(
-                "INSERT OR REPLACE INTO entity_merges (old_id, new_id) VALUES (?, ?)", (old, new))
-            graph.conn.execute("DELETE FROM entities WHERE entity_id=?", (old,))
-            merged += 1
+        merged += merge_group(graph, keeper["entity_id"], [r["entity_id"] for r in losers])
     report.entities_merged = merged
+    return merged
+
+
+def merge_group(graph: Graph, keeper_id: str, loser_ids: Sequence[str]) -> int:
+    """Collapse ``loser_ids`` into ``keeper_id``, repointing every reference.
+
+    Split out of :func:`_merge_entities` because the mechanical rule there —
+    ids differing only in punctuation — is not the only thing that decides a
+    merge. A human review or an adjudicator's verdict decides the same thing on
+    evidence the rule cannot see, and needs the identical repointing. The
+    element-wise JSON rewrite below is exactly the part that must not be
+    reimplemented per caller: a substring swap would corrupt any id that
+    contains another as a prefix.
+
+    Idempotent. A loser that no longer exists was already absorbed, so it is
+    skipped rather than treated as an error, which makes re-applying a verdicts
+    file safe.
+    """
+    keeper = graph.conn.execute(
+        "SELECT * FROM entities WHERE entity_id=?", (keeper_id,)).fetchone()
+    if keeper is None:
+        # It may itself have been absorbed by an earlier merge.
+        moved = graph.resolve_entity_id(keeper_id)
+        keeper = graph.conn.execute(
+            "SELECT * FROM entities WHERE entity_id=?", (moved,)).fetchone()
+    if keeper is None:
+        raise ValueError(f"merge keeper {keeper_id!r} is not an entity in this graph")
+
+    losers = []
+    for lid in loser_ids:
+        if lid == keeper["entity_id"]:
+            continue
+        row = graph.conn.execute(
+            "SELECT * FROM entities WHERE entity_id=?", (lid,)).fetchone()
+        if row is not None:
+            losers.append(row)
+    if not losers:
+        return 0
+
+    members = [keeper, *losers]
+    alias = set()
+    for r in members:
+        alias.update(_unj_list(r["aliases"]))
+    alias.update(r["name"] for r in losers)
+    alias.discard(keeper["name"])
+    best_desc = max((r["description"] or "" for r in members), key=len)
+    graph.conn.execute(
+        "UPDATE entities SET aliases=?, description=? WHERE entity_id=?",
+        (json.dumps(sorted(alias)), best_desc, keeper["entity_id"]))
+
+    merged = 0
+    for r in losers:
+        old, new = r["entity_id"], keeper["entity_id"]
+        graph.conn.execute(
+            "UPDATE citations SET record_id=? WHERE record_kind='entity' AND record_id=?",
+            (new, old))
+        graph.conn.execute("UPDATE entities SET parent_id=? WHERE parent_id=?", (new, old))
+        graph.conn.execute("UPDATE objects SET holder=? WHERE holder=?", (new, old))
+        # JSON id lists have to be rewritten element-wise, not string-replaced:
+        # a substring swap would corrupt any id that contains another as a prefix.
+        for table, col, idcol in (("events", "participants", "event_id"),
+                                  ("events", "observed_by", "event_id"),
+                                  ("threads", "characters", "thread_id")):
+            for row in graph.conn.execute(
+                    f"SELECT {idcol}, {col} FROM {table} WHERE {col} LIKE ?", (f'%"{old}"%',)):
+                try:
+                    ids = json.loads(row[col] or "[]")
+                except ValueError:
+                    continue
+                swapped = [new if x == old else x for x in ids]
+                seen_ids = list(dict.fromkeys(swapped))
+                graph.conn.execute(f"UPDATE {table} SET {col}=? WHERE {idcol}=?",
+                                   (json.dumps(seen_ids), row[idcol]))
+        # The graph's own references are all rewritten above, but a citation
+        # kept outside it -- notes, an eval fixture, a URL -- still names
+        # `old`, so record the redirect before the row is gone.
+        graph.conn.execute(
+            "INSERT OR REPLACE INTO entity_merges (old_id, new_id) VALUES (?, ?)", (old, new))
+        graph.conn.execute("DELETE FROM entities WHERE entity_id=?", (old,))
+        merged += 1
     return merged
 
 
