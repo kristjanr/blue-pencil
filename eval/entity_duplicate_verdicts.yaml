@@ -62,8 +62,8 @@ merge:
     why: Bill is Bob-3, surname Johansson. Same Bob.
   - id: 21
     keep: roberts_father
-    absorb: [dad-bob1]
-    why: as group 6, for the father.
+    absorb: [dad-bob1, bobs-father]
+    why: as group 6, for the father. `bobs-father` has no aliases, so the rule missed it.
   - id: 22
     keep: quinlan-cop
     absorb: [officer-friendly]
@@ -115,19 +115,32 @@ merge:
       Star Trek convention. will_riker_bob's own description states the rename.
   - id: 4
     keep: steven_gilligan
-    absorb: [professor_gilligan, steven-gilligan]
+    absorb: [professor_gilligan, steven-gilligan, dr-gilligan, steven, will-professor-friend]
     why: >
-      one professor leading the megastructure consortium across books 4-5.
-      NOT including the bare `steven` record — see hold.
+      All five are one man, and book 4.68.1 settles it in the prose: "Bridget and
+      Steven were trudging through the foothills outside Garack's Spine... Steven
+      was already agitating for an interview with ANEC. Dr. Gilligan was very
+      Bob-like." The narration moves from "Steven" to "Dr. Gilligan" in
+      consecutive sentences about the same man. 4.38.1 says it again from the
+      other side: "I knocked on Professor Gilligan's door... Steven stood there."
+      My earlier worry that a human professor had no business inside Heaven's
+      River was simply wrong — the scene header reads Virt; he is watching
+      Garack's Spine, not standing in it. `will-professor-friend` is "an unnamed
+      professor associated with Will", and Gilligan is Will's professor friend.
+      Note `dr-gilligan` and `will-professor-friend` carry no aliases at all, so
+      the candidate rule never reached them.
 
 partition:
   - id: 2
     keep: bob_johansson_human
-    absorb: [bob1, original_bob, bob_johannson]
+    absorb: [bob1, original_bob, bob_johannson, robert_johansson_original]
     leave_alone: [enoki_bob1_alias]
     why: >
       Bob Johansson, Bob-1 and Original Bob are one man and the spelling
-      "Johannson" is the extractor's typo. Enoki is held out deliberately: it is
+      "Johannson" is the extractor's typo. `robert_johansson_original` is the same
+      man again, and merging it is consistent with `bob_johannson` already being in
+      this group: the series' whole premise is that the replicant is continuous
+      with the human, so splitting the original off would contradict the text. Enoki is held out deliberately: it is
       Bob-1's undercover persona inside Heaven's River, and who knows that Enoki
       is Bob-1 is a fact the epistemic checker needs to be able to get wrong.
       Collapsing a persona into the person destroys that distinction.
@@ -147,10 +160,13 @@ split:
       notes Bob "explicitly confirmed" this Frieda is not the Frieda he knew.
       The series states distinctness out loud exactly once and this is it.
   - id: 9
-    members: [spike, spike-bill, spike-howard]
+    members: [spike, spike-bill, spike-howard, spike_npc]
     why: >
       Each Bob runs his own instance of the same VR cat. The records name them
-      "Bill's version" and "Howard's version". Same precedent as Guppy.
+      "Bill's version" and "Howard's version". Same precedent as Guppy. A fourth
+      turned up outside the candidate set: `spike_npc`, "a VR NPC cat modeled after
+      original Spike, present in Icarus's VR" — the text calls her "just an NPC"
+      and distinguishes "the original Spike". Four instances, one type.
   - id: 20
     members: [guppy, guppy-bob1]
     why: every replicant has a GUPPI. Kris already ruled this one split.
@@ -169,25 +185,33 @@ hold:   # Kris decides — I am not confident enough to merge or to rule out
       with Richards, the other "a Bobiverse replicant". Same failure shape as
       Charlie. One of the two descriptions is wrong.
   - id: 25
-    members: [christie_campbell, ser_campbell]
+    members: [christie_campbell, ser_campbell, campbell]
     question: >
       Christie Campbell leads the Vancouver Island enclave; Ser Campbell is
-      "likely on Vulcan" with mosquitoes and gravity complaints. Could be one
-      leader in two places, could be two colonists sharing a surname.
+      "likely on Vulcan" with mosquitoes and gravity complaints. A third turned up
+      outside the candidate set: `campbell`, "Premier Campbell", a political
+      leader talking to Bill and Ito about the colony crisis — and female ("put
+      her face in her hands"), which matches Christie. An enclave leader being
+      called Premier is ordinary. I lean merge on all three, but it rests on a
+      pronoun, so it is yours.
   - id: 31
     members: [richards, captain_richards]
     question: >
       Same contradiction as Kiroshi: "Bobiverse replicant" versus "human captain",
       in the same book-3 operation.
-  - id: 4b
-    members: [steven, steven_gilligan]
-    question: >
-      The bare `steven` is "trudging with Bridget outside Garack's Spine" — inside
-      Heaven's River, where a human professor has no business being. Either
-      Gilligan went in, or this is a different Steven.
   - id: 2b
     members: [enoki_bob1_alias, bob_johansson_human]
     question: >
       Should a character's undercover persona be its own entity? I have argued no
       merge above, but this is a modelling decision for the whole graph, not just
       for Enoki — Bob-1 is not the only Bob who goes under a name.
+
+# Checked and deliberately left alone — near-misses the surname scan turned up
+# that are NOT the same person. Recorded so nobody re-opens them:
+#   `george`   — a Bob replicant surveying star systems in book 5. Not George
+#                Butterworth, who is a human USE colonel and dead by then.
+#   `stephane` — "Stéphane", Bridget's romantic partner at her bedside in book 2.
+#                Possibly Stéphane Brodeur the security chief, but nothing in
+#                either record says so, and the rule is positive evidence only.
+#   `steven-carlisle`, `chief_draper`, `hubert`, `theresa-granddaughter`,
+#   `robert...` variants above — different people who merely share a name token.
