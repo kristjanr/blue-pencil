@@ -1,5 +1,7 @@
 """The prune pass merges duplicates but never resolves a contradiction."""
 
+import json
+
 from bp.extract import ExtractReport, audit_sample, prune
 from bp.models import BeliefRecord, Citation, Event, ObjectRecord
 
@@ -208,3 +210,91 @@ def test_resolve_entity_id_does_not_loop_forever_on_a_cycle():
         graph.commit()
         assert graph.resolve_entity_id("a") in ("a", "b")
         graph.close()
+
+
+def test_cast_is_participation_not_mention(world):
+    """The bug this test exists for: ingest tags a scene with any known name
+    appearing anywhere in its text, so a character merely talked about is
+    recorded as present — and knowledge.last_placement, the geography
+    checker's source of truth for where someone was last seen, reads exactly
+    that field. Being named in dialogue must not place you in the scene."""
+    from bp.extract import rebuild_scene_cast
+    from bp.models import Entity
+
+    graph, profile = world
+    scene = graph.scenes()[0].scene_id
+    cit = [Citation(scene=scene, quote="q")]
+    for eid, name in (("e-present", "Present"), ("e-absent", "Absent")):
+        graph.write_entity(Entity(entity_id=eid, name=name, kind="character", citations=cit))
+    graph.write_event(Event(
+        event_id="E-cast", summary="Present does something", when="2186-01-01", where="Sol",
+        participants=["Present"], observed_by=["Present"], citations=cit))
+    # The heuristic's shape: both names tagged, because both appear in the prose.
+    graph.conn.execute("UPDATE scenes SET cast_json=? WHERE scene_id=?",
+                       ('["Present", "Absent", "Okay"]', scene))
+    graph.commit()
+
+    rebuild_scene_cast(graph, profile, apply=True)
+    cast = json.loads(graph.conn.execute(
+        "SELECT cast_json FROM scenes WHERE scene_id=?", (scene,)).fetchone()[0])
+    assert "Present" in cast, "a participant in an event cited here is present"
+    assert "Absent" not in cast, "merely being named in the prose is not being present"
+    assert "Okay" not in cast, "a capitalised sentence opener was never a character"
+
+
+def test_cast_rebuild_stores_names_not_ids(world):
+    """knowledge.py compares cast entries against profile.canonical(name), so
+    storing entity ids would silently never match — a worse failure than the
+    one being fixed."""
+    from bp.extract import rebuild_scene_cast
+    from bp.models import Entity
+
+    graph, profile = world
+    scene = graph.scenes()[0].scene_id
+    cit = [Citation(scene=scene, quote="q")]
+    graph.write_entity(Entity(entity_id="cap-hurricane", name="Captain Hurricane",
+                              kind="character", citations=cit))
+    graph.write_event(Event(
+        event_id="E-byid", summary="the captain acts", when="2186-01-01", where="Sol",
+        participants=["cap-hurricane"], citations=cit))
+    graph.commit()
+
+    rebuild_scene_cast(graph, profile, apply=True)
+    cast = json.loads(graph.conn.execute(
+        "SELECT cast_json FROM scenes WHERE scene_id=?", (scene,)).fetchone()[0])
+    assert "Captain Hurricane" in cast
+    assert "cap-hurricane" not in cast
+
+
+def test_cast_rebuild_drops_groups_rather_than_inventing_them(world):
+    """Real rows carry "the assembled Bobs" and "Howard's military escort". A
+    placement index can only answer for a specific character."""
+    from bp.extract import rebuild_scene_cast
+
+    graph, profile = world
+    scene = graph.scenes()[0].scene_id
+    graph.write_event(Event(
+        event_id="E-group", summary="a crowd gathers", when="2186-01-01", where="Sol",
+        participants=["the assembled Bobs"], citations=[Citation(scene=scene, quote="q")]))
+    graph.commit()
+
+    report = rebuild_scene_cast(graph, profile, apply=True)
+    cast = json.loads(graph.conn.execute(
+        "SELECT cast_json FROM scenes WHERE scene_id=?", (scene,)).fetchone()[0])
+    assert "the assembled Bobs" not in cast
+    assert report.dropped_tokens.get("the assembled Bobs") == 1
+
+
+def test_cast_rebuild_dry_run_writes_nothing(world):
+    from bp.extract import rebuild_scene_cast
+
+    graph, profile = world
+    scene = graph.scenes()[0].scene_id
+    graph.conn.execute("UPDATE scenes SET cast_json=? WHERE scene_id=?", ('["Okay"]', scene))
+    graph.commit()
+
+    report = rebuild_scene_cast(graph, profile, apply=False)
+    after = graph.conn.execute(
+        "SELECT cast_json FROM scenes WHERE scene_id=?", (scene,)).fetchone()[0]
+    assert json.loads(after) == ["Okay"], "a dry run must not touch the graph"
+    assert report.scenes_changed >= 1, "but it must still report what would change"

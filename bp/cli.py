@@ -139,6 +139,20 @@ def cmd_ground(args) -> int:
     return 1 if (report.quote_missing or report.ungrounded) else 0
 
 
+def cmd_cast(args) -> int:
+    from .extract import rebuild_scene_cast
+
+    ws = Workspace.find()
+    profile = ws.load_profile(args.profile)
+    graph = ws.open_graph(profile, db=args.db)
+    report = rebuild_scene_cast(graph, profile, apply=args.apply)
+    _echo(report.render())
+    if not args.apply:
+        _echo("\ndry run — nothing written. Re-run with --apply to rebuild.")
+    graph.close()
+    return 0
+
+
 def cmd_audit(args) -> int:
     from .extract import audit_sample
 
@@ -661,6 +675,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="mark records whose quote cannot be found as inferred, confidence 0.5")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_ground)
+
+    sp = sub.add_parser("cast", help="rebuild scene cast from cited events (no model, no cost)")
+    common(sp)
+    sp.add_argument("--apply", action="store_true", help="write the rebuilt cast; default is a dry run")
+    sp.set_defaults(func=cmd_cast)
 
     sp = sub.add_parser("audit", help="sample cited claims for the Phase 1 spot audit")
     common(sp)

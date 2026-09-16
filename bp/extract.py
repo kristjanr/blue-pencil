@@ -572,6 +572,143 @@ def _merge_entities(graph: Graph, report: "ExtractReport") -> int:
     return merged
 
 
+@dataclass
+class CastRebuild:
+    """What rebuilding scene cast from cited events would change."""
+
+    scenes: int = 0
+    scenes_changed: int = 0
+    scenes_emptied: int = 0
+    entries_before: int = 0
+    entries_after: int = 0
+    dropped_tokens: dict[str, int] = field(default_factory=dict)
+
+    def render(self) -> str:
+        lines = [
+            f"{self.scenes:,} scenes · {self.scenes_changed:,} would change",
+            f"cast entries: {self.entries_before:,} -> {self.entries_after:,}",
+            f"scenes left with no cast at all: {self.scenes_emptied:,}",
+        ]
+        if self.dropped_tokens:
+            top = sorted(self.dropped_tokens.items(), key=lambda t: -t[1])[:10]
+            lines.append("participants naming no known entity (dropped): "
+                         + ", ".join(f"{name!r}×{n}" for name, n in top))
+        return "\n".join(lines)
+
+
+def rebuild_scene_cast(graph: Graph, profile: SeriesProfile, *, apply: bool = False) -> CastRebuild:
+    """Derive each scene's cast from the events cited to it.
+
+    ``ingest.detect_cast`` tags a scene with any known name appearing anywhere
+    in its text, and ``ingest.harvest_names`` builds that name list out of
+    capitalised-word frequency — so "Okay", "Yeah" and "Let" are recorded as
+    characters, and anyone merely *named in dialogue* is recorded as present.
+    ``ingest`` calls that a bootstrap which "extraction replaces with cited
+    entity records"; the replacement was never built, so
+    ``knowledge.last_placement`` — the geography checker's source of truth for
+    where a character was last seen — has been reading the bootstrap all along,
+    and will place a character anywhere they were once talked about.
+
+    An event cited to a scene is participation rather than mention, which is
+    exactly the distinction the heuristic cannot make. Two rules keep the
+    result usable:
+
+    *Store canonical names, not entity ids.* ``knowledge`` compares cast
+    entries against ``profile.canonical(character)``, so an id would silently
+    never match — a worse failure than the one being fixed.
+
+    *Drop a participant that names no known entity rather than guessing.* Real
+    rows carry things like "the assembled Bobs" and "Howard's military escort";
+    a placement index can only answer for a specific character, so a group
+    belongs in neither the cast nor a made-up entity.
+    """
+    from .resolve import norm_name
+
+    entity_name: dict[str, str] = {}
+    # A second index under resolve.norm_name, which folds case, punctuation, a
+    # trailing plural and a parenthetical qualifier. Participants arrive spelled
+    # the way the prose spells them ("Will Riker") while the record carries the
+    # disambiguating shape ("Will (Riker)"), and that is a difference in
+    # notation, not in identity. Deliberately NOT fuzzy: same normaliser the
+    # entity resolver already groups records with, and a form claimed by more
+    # than one entity is dropped rather than guessed between.
+    normed: dict[str, set[str]] = {}
+    for r in graph.conn.execute("SELECT entity_id, name, aliases FROM entities"):
+        canon = profile.canonical(r["name"]) if profile else r["name"]
+        forms = [r["name"], r["entity_id"], *_unj_list(r["aliases"])]
+        for key in forms:
+            if key:
+                entity_name.setdefault(key.strip().casefold(), canon)
+                normed.setdefault(norm_name(key), set()).add(canon)
+
+    def resolve(token: str) -> str:
+        raw = (token or "").strip()
+        if not raw:
+            return ""
+        hit = entity_name.get(raw.casefold())
+        if hit:
+            return hit
+        # An id absorbed by a merge still points at a live record.
+        moved = graph.resolve_entity_id(raw)
+        if moved != raw:
+            hit = entity_name.get(moved.strip().casefold())
+            if hit:
+                return hit
+        claimants = normed.get(norm_name(raw), set())
+        return next(iter(claimants)) if len(claimants) == 1 else ""
+
+    cited_scenes: dict[str, set[str]] = {}
+    for r in graph.conn.execute(
+            "SELECT record_id, scene_id FROM citations WHERE record_kind='event'"):
+        cited_scenes.setdefault(r["record_id"], set()).add(r["scene_id"])
+
+    derived: dict[str, set[str]] = {}
+    report = CastRebuild()
+    for r in graph.conn.execute("SELECT event_id, participants, observed_by FROM events"):
+        scenes = cited_scenes.get(r["event_id"])
+        if not scenes:
+            continue
+        people = _unj_list(r["participants"]) + _unj_list(r["observed_by"])
+        for token in people:
+            name = resolve(token)
+            if not name:
+                if token and token.strip():
+                    report.dropped_tokens[token] = report.dropped_tokens.get(token, 0) + 1
+                continue
+            for sid in scenes:
+                derived.setdefault(sid, set()).add(name)
+
+    for row in graph.conn.execute("SELECT scene_id, pov, cast_json FROM scenes"):
+        sid = row["scene_id"]
+        report.scenes += 1
+        cast = derived.get(sid, set())
+        pov = profile.canonical(row["pov"]) if profile and row["pov"] else (row["pov"] or "")
+        if pov:
+            cast = cast | {pov}
+        before = _unj_list(row["cast_json"])
+        after = sorted(cast)
+        report.entries_before += len(before)
+        report.entries_after += len(after)
+        if not after:
+            report.scenes_emptied += 1
+        if sorted(before) != after:
+            report.scenes_changed += 1
+            if apply:
+                graph.conn.execute("UPDATE scenes SET cast_json=? WHERE scene_id=?",
+                                   (json.dumps(after, ensure_ascii=False), sid))
+    if apply:
+        graph.conn.commit()
+    return report
+
+
+def _unj_list(value: str | None) -> list[str]:
+    try:
+        out = json.loads(value or "[]")
+    except ValueError:
+        return []
+    return [str(x) for x in out if x] if isinstance(out, list) else []
+
+
 def prune(graph: Graph, profile: SeriesProfile, report: ExtractReport) -> None:
     """Second pass: merge duplicates and open a contradiction record for conflicts.
 
@@ -702,6 +839,11 @@ def prune(graph: Graph, profile: SeriesProfile, report: ExtractReport) -> None:
             note="if the series allows restoration, set entities.revivable in the profile",
         ))
         report.contradictions += 1
+
+    # Cast last: it is derived from the events cited to each scene, and the
+    # steps above merge entities and repoint event citations. Deriving it any
+    # earlier would index ids and events that are about to move.
+    rebuild_scene_cast(graph, profile, apply=True)
 
 
 def audit_sample(graph: Graph, n: int = 50, *, seed: int = 0) -> list[dict]:
