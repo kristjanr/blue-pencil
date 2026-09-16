@@ -237,7 +237,7 @@ class SettleReport:
 
     scenes_read: int = 0
     closes: list[tuple[str, str, str, float]] = field(default_factory=list)
-    rejected_quote: list[tuple[str, str]] = field(default_factory=list)
+    rejected_quote: list[tuple[str, str, str]] = field(default_factory=list)
     rejected_unknown: list[tuple[str, str]] = field(default_factory=list)
     echoed: int = 0
     unechoed: int = 0
@@ -251,6 +251,11 @@ class SettleReport:
             f"closes rejected because the quote is not in the scene: {len(self.rejected_quote)}",
             f"closes naming a promise that was not a candidate: {len(self.rejected_unknown)}",
         ]
+        # The rejected quote is the interesting one: a model that paraphrases
+        # instead of copying looks identical to one that invents, and only the
+        # text tells them apart.
+        for sid, pid, quote in self.rejected_quote[:5]:
+            lines.append(f"  REJECTED {sid} <- {pid}: {quote[:100]!r}")
         if self.closes:
             # work-ed's check: if it only ever closes promises whose own words
             # are echoed in the scene, it is doing string matching in an
@@ -339,7 +344,7 @@ def settle(
                 continue
             nq = _norm(c.quote)
             if not nq or nq not in scene_norm:
-                report.rejected_quote.append((scene["scene_id"], c.promise_id))
+                report.rejected_quote.append((scene["scene_id"], c.promise_id, c.quote))
                 continue
             closed.add(c.promise_id)
             report.closes.append((scene["scene_id"], c.promise_id, c.why, c.confidence))

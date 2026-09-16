@@ -88,22 +88,51 @@ class ObjectAndBodyCheck:
             ))
         return out
 
+    #: Not the character doing something — prepositions, conjunctions and
+    #: determiners that follow a name in a list or a phrase. This is the whole
+    #: Alan false alarm: "I hadn't thought of Carl, Karen, and Alan in,
+    #: literally, centuries" matched `Alan` + `in` and called it an action.
+    _NOT_ACTION = frozenset("""
+    in on at to for from with and or but of as than the a an by about into over under
+    after before while when who whom whose that this these those again too very
+    """.split())
+
+    #: The narrator is remembering, not watching.
+    _RECALL = ("hadn't thought", "had not thought", "used to", "back when", "i remember",
+               "remembered", "in those days", "years ago", "centuries ago", "long before",
+               "thought of", "memory of", "reminded")
+
+    #: Irregular pasts that do not end in -ed. A dead character in a past-tense
+    #: sentence is being recalled, not resurrected.
+    _PAST = frozenset("""
+    was were had been did went came saw said told knew took gave made found left ran
+    flew built wrote thought became felt kept held lost met sent spoke stood won
+    """.split())
+
     @staticmethod
     def _appears_acting(ctx: CheckContext, name: str) -> bool:
         """Distinguish 'Milo died at Epsilon' from 'Milo said'.
 
-        Crude but conservative: a name followed by a verb-ish word, not preceded
-        by a death cue in the same sentence.
+        Only ever asked about a character the graph records as dead, so it is
+        deliberately conservative: a missed resurrection is cheap to catch on
+        the page, and a false one trains the writer to ignore the check. Three
+        ways to not be acting — the sentence carries a death cue, the narrator
+        is explicitly remembering, or the verb is in the past tense.
         """
         import re
 
-        for m in re.finditer(rf"\b{re.escape(name)}\b(?:'s)?\s+([a-z]+)", ctx.draft.text):
+        text = ctx.draft.text
+        for m in re.finditer(rf"\b{re.escape(name)}\b(?:'s)?\s+([a-z]+)", text):
             verb = m.group(1)
-            sentence_start = ctx.draft.text.rfind(".", 0, m.start()) + 1
-            sentence = ctx.draft.text[sentence_start : m.end() + 60].lower()
+            if verb in ObjectAndBodyCheck._NOT_ACTION or verb in ObjectAndBodyCheck._PAST:
+                continue
+            if verb.endswith("ed"):
+                continue
+            sentence_start = text.rfind(".", 0, m.start()) + 1
+            sentence = text[sentence_start : m.end() + 60].lower()
             if any(cue in sentence for cue in ObjectAndBodyCheck._DEATH_CUES):
                 continue
-            if verb in {"was", "had", "died", "is", "would", "used", "once", "never"}:
+            if any(cue in sentence for cue in ObjectAndBodyCheck._RECALL):
                 continue
             return True
         return False

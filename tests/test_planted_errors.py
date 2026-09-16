@@ -219,7 +219,7 @@ def test_a_dead_faction_is_not_a_resurrection(world):
                               status="dead", citations=cit))
     graph.commit()
 
-    draft = Draft.parse("Pavlov attacked the convoy. Kessring attacked the convoy too.\n")
+    draft = Draft.parse("Pavlov storms the convoy. Kessring boards her too.\n")
     draft.meta = {"pov": "Ana", "date": "2185-01-01", "place": "Sol"}
     ctx = CheckContext(draft=draft, graph=graph, profile=profile,
                        policy=RunPolicy.from_dict({}))
@@ -227,3 +227,32 @@ def test_a_dead_faction_is_not_a_resurrection(world):
 
     assert "Kessring" in named, "a dead character acting on the page is the real finding"
     assert "Pavlov" not in named, "a faction is not somebody who can be resurrected"
+
+
+def test_a_dead_character_being_remembered_is_not_acting(world):
+    """`Alan is recorded dead but acts in this chapter` — from a narrator who
+    says outright he hasn't thought of Alan in centuries. Being remembered, in
+    the past tense, is not walking onto the page."""
+    from bp.checks.objects import ObjectAndBodyCheck
+    from bp.models import Citation, Entity
+
+    graph, profile = world
+    cit = [Citation(scene=graph.scenes()[0].scene_id, quote="q")]
+    graph.write_entity(Entity(entity_id="alan", name="Alan", kind="character",
+                              status="dead", citations=cit))
+    graph.commit()
+
+    def acts(text):
+        draft = Draft.parse(text)
+        draft.meta = {"pov": "Ana", "date": "2185-01-01", "place": "Sol"}
+        ctx = CheckContext(draft=draft, graph=graph, profile=profile,
+                           policy=RunPolicy.from_dict({}))
+        return bool(ObjectAndBodyCheck().run(ctx))
+
+    assert not acts("I hadn't thought of Carl, Karen, and Alan in, literally, centuries. "
+                    "Alan had been a dedicated sailplane pilot.\n"), \
+        "past-tense reminiscence is not action"
+    assert not acts("Alan walked the ridge, back when the colony was new.\n"), \
+        "an explicitly recalled scene is not action either"
+    assert acts("Alan grabs the rail and shouts a warning.\n"), \
+        "but a dead man doing something in the present still is"
