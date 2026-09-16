@@ -258,6 +258,11 @@ def cmd_batch(args) -> int:
     if not args.batch_id:
         _echo("give a batch id, or use `bp batch list`")
         return 1
+    if args.what == "cancel":
+        b = client.messages.batches.cancel(args.batch_id)
+        _echo(f"{b.id} · {b.processing_status} · "
+              f"{b.request_counts.succeeded} already succeeded (those are still billed)")
+        return 0
     b = client.messages.batches.retrieve(args.batch_id)
     c = b.request_counts
     _echo(f"{b.id}\n  status     {b.processing_status}\n  created    {b.created_at}\n"
@@ -827,7 +832,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_settle)
 
     sp = sub.add_parser("batch", help="look in on a submitted Batch API job")
-    sp.add_argument("what", choices=["status", "list"], nargs="?", default="status")
+    sp.add_argument("what", choices=["status", "list", "cancel"], nargs="?", default="status")
     sp.add_argument("batch_id", nargs="?", default=None)
     sp.add_argument("--limit", type=int, default=10)
     sp.set_defaults(func=cmd_batch)
