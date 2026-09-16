@@ -280,6 +280,27 @@ CREATE TABLE IF NOT EXISTS editor_notes (
 );
 CREATE INDEX IF NOT EXISTS idx_editor_notes_book ON editor_notes(book, chapter);
 
+-- Every non-additive change to a record: what it was before, what it became,
+-- and which run did it. An entity merge already leaves `entity_merges` behind
+-- and that is the only reason a bad merge can be traced. Demotion left nothing,
+-- so correcting the check that caused 156 wrong demotions could only be undone
+-- because a backup happened to predate it -- luck standing in for design, and
+-- luck that will not hold the next time a checker is corrected. A restore
+-- should be a join, not an archaeology exercise.
+CREATE TABLE IF NOT EXISTS record_changes (
+    change_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT DEFAULT '',
+    table_name  TEXT NOT NULL,
+    record_id   TEXT NOT NULL,
+    field       TEXT NOT NULL,
+    old_value   TEXT,
+    new_value   TEXT,
+    reason      TEXT DEFAULT '',
+    changed_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_changes_record ON record_changes(table_name, record_id);
+CREATE INDEX IF NOT EXISTS idx_changes_run ON record_changes(run_id);
+
 -- An entity merge deletes `old_id` after rewriting every in-graph reference to
 -- `new_id`, which is right for the graph's own foreign keys but leaves nothing
 -- for an OUTSIDE reference to redirect through -- a citation kept in someone's
@@ -753,6 +774,30 @@ class Graph:
         if status:
             return list(self.conn.execute("SELECT * FROM threads WHERE status=?", (status,)))
         return list(self.conn.execute("SELECT * FROM threads"))
+
+    def record_change(self, *, table: str, record_id: str, field: str,
+                      old: object, new: object, run_id: str = "", reason: str = "") -> None:
+        """Note that a record's field was overwritten, and with what.
+
+        Call this before the UPDATE, not after — the point is the old value,
+        and once it is written it is gone. Additive writes do not need it; this
+        is for the changes that destroy something.
+        """
+        self.conn.execute(
+            """INSERT INTO record_changes
+               (run_id, table_name, record_id, field, old_value, new_value, reason)
+               VALUES (?,?,?,?,?,?,?)""",
+            (run_id, table, record_id, field,
+             None if old is None else str(old), None if new is None else str(new), reason))
+
+    def changes_for(self, table: str, record_id: str) -> list[sqlite3.Row]:
+        return list(self.conn.execute(
+            "SELECT * FROM record_changes WHERE table_name=? AND record_id=? ORDER BY change_id",
+            (table, record_id)))
+
+    def changes_in_run(self, run_id: str) -> list[sqlite3.Row]:
+        return list(self.conn.execute(
+            "SELECT * FROM record_changes WHERE run_id=? ORDER BY change_id", (run_id,)))
 
     def write_editor_note(self, *, book: str, chapter: int, scene_ids: Sequence[str], note: str) -> None:
         """Record why a human accepted a chapter, not just that they did.

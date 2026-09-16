@@ -251,7 +251,7 @@ _TABLE_FOR = {"entity": ("entities", "entity_id"), "event": ("events", "event_id
 UNPROVEN_CONFIDENCE = 0.5
 
 
-def demote_unproven(graph, report: Report) -> dict[str, int]:
+def demote_unproven(graph, report: Report, *, run_id: str = "") -> dict[str, int]:
     """Strip the authority of evidence from records that have none.
 
     Extraction already does this for a record that arrives with no citation at
@@ -265,12 +265,26 @@ def demote_unproven(graph, report: Report) -> dict[str, int]:
     trusting it as though a human had checked it.
     """
     counts: dict[str, int] = {}
+    run_id = run_id or f"demote-{__import__('time').strftime('%Y%m%d-%H%M%S')}"
     for f in report.findings:
         if f.quote_ok:
             continue
         table, idcol = _TABLE_FOR.get(f.kind, (None, None))
         if table is None:
             continue
+        # Record what is about to be destroyed, before destroying it. When 156
+        # of these turned out to be punctuation artefacts rather than invented
+        # quotes, the only reason the demotion could be undone was that a backup
+        # happened to predate it — luck standing in for design.
+        before = graph.conn.execute(
+            f"SELECT claim_type, confidence FROM {table} WHERE {idcol}=?", (f.record_id,)).fetchone()
+        if before is not None:
+            for field, new in (("claim_type", "inferred"),
+                               ("confidence", min(before["confidence"], UNPROVEN_CONFIDENCE))):
+                if before[field] != new:
+                    graph.record_change(table=table, record_id=f.record_id, field=field,
+                                        old=before[field], new=new, run_id=run_id,
+                                        reason=f"grounding: {f.severity}")
         cur = graph.conn.execute(
             f"UPDATE {table} SET claim_type='inferred', confidence=MIN(confidence, ?) "
             f"WHERE {idcol}=? AND (claim_type != 'inferred' OR confidence > ?)",

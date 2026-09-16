@@ -270,3 +270,40 @@ def test_an_escaped_apostrophe_does_not_read_as_a_fabricated_quote(world):
         {"promise_id": "P-1", "quote": "a line that is nowhere in this scene", "why": "x"}]}]),
         model="claude-sonnet-5", max_usd=5.0)
     assert report.closes == [], "and a quote that really is absent still fails"
+
+
+def test_closing_a_promise_records_what_it_overwrote(world):
+    """We will correct this settler's prompt at least once, and then want to
+    know which closes came from the run before the fix."""
+    from bp.settle import settle
+
+    graph, profile = world
+    scenes = _scene_ids(world)
+    _open_promise(graph, "P-1", scenes[0])
+    graph.commit()
+    line = " ".join(graph.scene(scenes[1]).text.split()[:8])
+
+    settle(graph, profile, _FakeClient([{"closes": [
+        {"promise_id": "P-1", "quote": line, "why": "paid"}]}]),
+        model="claude-sonnet-5", max_usd=5.0, apply=True, run_id="settle-under-test")
+
+    changes = {c["field"]: c for c in graph.changes_for("promises", "P-1")}
+    assert changes["status"]["old_value"] == "open"
+    assert changes["status"]["new_value"] == "paid"
+    assert changes["paid_in"]["new_value"] == scenes[1]
+    assert graph.changes_in_run("settle-under-test")
+
+
+def test_a_dry_run_leaves_no_trail(world):
+    from bp.settle import settle
+
+    graph, profile = world
+    scenes = _scene_ids(world)
+    _open_promise(graph, "P-1", scenes[0])
+    graph.commit()
+    line = " ".join(graph.scene(scenes[1]).text.split()[:8])
+
+    settle(graph, profile, _FakeClient([{"closes": [
+        {"promise_id": "P-1", "quote": line, "why": "paid"}]}]),
+        model="claude-sonnet-5", max_usd=5.0, run_id="dry-under-test")
+    assert graph.changes_in_run("dry-under-test") == []

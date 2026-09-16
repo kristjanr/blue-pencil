@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 import re
 import statistics
+import time
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
@@ -294,6 +295,27 @@ class SettleReport:
         return "\n".join(lines)
 
 
+def _close(graph, promise_id: str, scene_id: str, run_id: str, confidence: float) -> None:
+    """Mark a promise paid, leaving behind what it was and which run did it.
+
+    Closing overwrites `status` and `paid_in` on a record that was open, and we
+    will correct this settler's prompt at least once. Without the trail there is
+    no way to ask "which closes came from the run before the fix" — the same
+    hole that made 156 wrong demotions an archaeology exercise.
+    """
+    before = graph.conn.execute(
+        "SELECT status, paid_in FROM promises WHERE promise_id=?", (promise_id,)).fetchone()
+    if before is None:
+        return
+    for fieldname, new in (("status", "paid"), ("paid_in", scene_id)):
+        if before[fieldname] != new:
+            graph.record_change(table="promises", record_id=promise_id, field=fieldname,
+                                old=before[fieldname], new=new, run_id=run_id,
+                                reason=f"settled at confidence {confidence:.2f}")
+    graph.conn.execute("UPDATE promises SET status='paid', paid_in=? WHERE promise_id=?",
+                       (scene_id, promise_id))
+
+
 def _decode_escapes(text: str) -> str:
     """Turn a literal ``\\u2019`` back into the character it stands for.
 
@@ -316,7 +338,7 @@ def _distinctive(text: str) -> set[str]:
 def settle(
     graph: Graph, profile: SeriesProfile, client, *, model: str,
     scene_ids: list[str] | None = None, max_usd: float = 1.0,
-    apply: bool = False, progress=lambda _s: None,
+    apply: bool = False, run_id: str = "", progress=lambda _s: None,
 ) -> SettleReport:
     """Ask each scene which of its candidate promises it pays off.
 
@@ -336,6 +358,7 @@ def settle(
     """
     from .llm import Usage, rate_for, structured
 
+    run_id = run_id or f"settle-{time.strftime('%Y%m%d-%H%M%S')}-{model}"
     index, _ = candidate_index(graph, profile)
     rows = {r["promise_id"]: dict(r) for r in graph.conn.execute(
         "SELECT promise_id, summary FROM promises WHERE status='open'")}
@@ -389,9 +412,7 @@ def settle(
             else:
                 report.unechoed += 1
             if apply:
-                graph.conn.execute(
-                    "UPDATE promises SET status='paid', paid_in=? WHERE promise_id=?",
-                    (scene["scene_id"], c.promise_id))
+                _close(graph, c.promise_id, scene["scene_id"], run_id, c.confidence)
         progress(f"  {scene['scene_id']}: {len(candidates)} candidates, "
                  f"{len(out.closes)} proposed, ${usage.usd:,.2f} so far")
 
@@ -413,7 +434,7 @@ _ESTIMATE_SLACK = 2.3
 def settle_batch(
     graph: Graph, profile: SeriesProfile, client, *, model: str,
     scene_ids: list[str] | None = None, max_usd: float = 10.0,
-    apply: bool = False, progress=lambda _s: None,
+    apply: bool = False, run_id: str = "", progress=lambda _s: None,
 ) -> SettleReport:
     """The same question, submitted through the Batch API at half price.
 
@@ -429,6 +450,7 @@ def settle_batch(
     from .extract import _custom_id
     from .llm import BATCH_DISCOUNT, Usage, poll_batch, rate_for, submit_batch
 
+    run_id = run_id or f"settle-{time.strftime('%Y%m%d-%H%M%S')}-{model}-batch"
     index, _ = candidate_index(graph, profile)
     rows = {r["promise_id"]: dict(r) for r in graph.conn.execute(
         "SELECT promise_id, summary FROM promises WHERE status='open'")}
@@ -512,9 +534,7 @@ def settle_batch(
             else:
                 report.unechoed += 1
             if apply:
-                graph.conn.execute(
-                    "UPDATE promises SET status='paid', paid_in=? WHERE promise_id=?",
-                    (scene["scene_id"], c.promise_id))
+                _close(graph, c.promise_id, scene["scene_id"], run_id, c.confidence)
 
     report.usd = usage.usd
     if apply:

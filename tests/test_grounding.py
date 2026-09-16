@@ -152,3 +152,46 @@ def test_the_rescue_needs_real_overlap_not_a_coincidence(world):
     rep = check_grounding(graph)
     assert "E-short" in {f.record_id for f in rep.findings if not f.quote_ok}
     assert len(_loose("the and a")) <= 30
+
+
+def test_demotion_records_what_it_overwrote(world):
+    """The reason this exists: when 156 demotions turned out to be wrong, the
+    only thing that made them reversible was a backup that happened to predate
+    them. Luck standing in for design. A restore should be a join."""
+    from bp.grounding import demote_unproven
+
+    graph, _ = world
+    scene = graph.scenes()[0].scene_id
+    graph.write_event(Event(
+        event_id="E-trail", summary="asserted without evidence", when="2186-01-01",
+        where="Sol", observed_by=["Ana"], claim_type="explicit", confidence=0.95,
+        citations=[Citation(scene=scene, quote="a line that is nowhere in this corpus")]))
+    graph.commit()
+
+    demote_unproven(graph, check_grounding(graph), run_id="run-under-test")
+
+    changes = {c["field"]: c for c in graph.changes_for("events", "E-trail")}
+    assert changes["claim_type"]["old_value"] == "explicit"
+    assert changes["claim_type"]["new_value"] == "inferred"
+    assert float(changes["confidence"]["old_value"]) == 0.95
+    assert all(c["run_id"] == "run-under-test" for c in changes.values())
+    assert len(graph.changes_in_run("run-under-test")) >= 2
+
+
+def test_demotion_records_nothing_when_it_changes_nothing(world):
+    """A trail of no-ops is noise, and the second run of a demotion is all
+    no-ops."""
+    from bp.grounding import demote_unproven
+
+    graph, _ = world
+    scene = graph.scenes()[0].scene_id
+    graph.write_event(Event(
+        event_id="E-twice-trail", summary="unprovable", when="2186-01-01", where="Sol",
+        observed_by=["Ana"], claim_type="explicit", confidence=0.9,
+        citations=[Citation(scene=scene, quote="not in the corpus at all")]))
+    graph.commit()
+
+    demote_unproven(graph, check_grounding(graph), run_id="first")
+    demote_unproven(graph, check_grounding(graph), run_id="second")
+    assert graph.changes_in_run("first")
+    assert graph.changes_in_run("second") == []
