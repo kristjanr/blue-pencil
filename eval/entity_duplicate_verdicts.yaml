@@ -1,0 +1,193 @@
+# Verdicts on the 32 alias-linked duplicate groups the cast rebuild exposed.
+#
+# Found by the rule already in resolve.py's candidates(): one record's NAME
+# appears in another's aliases, with the rarity cap (an alias claimed by more
+# than 3 entities is "Bob" — it discriminates nobody and is skipped).
+#
+# Why these matter: 44.1% of scene-cast entries name a character that exists as
+# more than one record. knowledge.py's last_placement() matches cast entries
+# against one canonical name, so a character split across two records is
+# invisible in half the scenes he appears in — and the geography checker then
+# reports a stale position. That is a false-alarm engine, and step 1 of the
+# evaluation ladder is a false-alarm count.
+#
+# Standing rule (STATUS.md): merge only on positive evidence; default to split.
+# Merging two people is worse than leaving one person split.
+#
+# verdict: merge     — one entity, collapse all members
+#          partition — some members are the same, others are not (groups listed)
+#          split     — leave every member alone
+#          hold      — I am not confident; Kris decides
+
+merge:
+  - id: 3
+    keep: stephane_brodeur
+    absorb: [brodeur, chief_brodeur, mr_brodeur]
+    why: one Vulcan security chief; the four records differ only by how formally the text names him.
+  - id: 6
+    keep: bobs_mother
+    absorb: [roberts_mother, mom-bob1]
+    why: Bob and Robert are the same man; all three describe the mother left behind on Earth.
+  - id: 7
+    keep: mr-badger
+    absorb: [badger, his-badgerness]
+    why: one animal in one book-4 den; "His Badgerness" and "the badger" are Bob-1's own epithets for it.
+  - id: 8
+    keep: anec-23
+    absorb: [ANEC, administrator-heavens-river]
+    why: ANEC-23 is the Administrator, and ANEC is its short form. Its own record names both.
+  - id: 11
+    keep: george_butterworth
+    absorb: [colonel_butterworth, butterworth]
+    why: one USE colonel across books 2-3; the book-3 records are him retired and then dead.
+  - id: 13
+    keep: kenneth-martins
+    absorb: [kenneth]
+    why: both are the rival candidate mind in the FAITH computer room.
+  - id: 14
+    keep: swarna_misra
+    absorb: [misra]
+    why: one UN delegate in one book-3 scene.
+  - id: 16
+    keep: hector_rodriguez
+    absorb: [hector]
+    why: both lead the Huey commercial operation in book 5.
+  - id: 18
+    keep: captain_lisa
+    absorb: [captain-lisa]
+    why: one captain of the Hurricane.
+  - id: 19
+    keep: bob-3-bill
+    absorb: [bill_johannson]
+    why: Bill is Bob-3, surname Johansson. Same Bob.
+  - id: 21
+    keep: roberts_father
+    absorb: [dad-bob1]
+    why: as group 6, for the father.
+  - id: 22
+    keep: quinlan-cop
+    absorb: [officer-friendly]
+    why: Officer Friendly is Bob-1's nickname for the same town cop, in the same book-4 sequence.
+  - id: 23
+    keep: herschel
+    absorb: [hersch]
+    why: Herschel's record already carries "Hersch" as an alias.
+  - id: 24
+    keep: katsu_ito
+    absorb: [ser_ito]
+    why: Ser is the series' honorific; one Japanese enclave leader.
+  - id: 26
+    keep: hannah_turnbull
+    absorb: [hannah]
+    why: one physicist at the book-5 moot, visiting Bill about wormholes.
+  - id: 27
+    keep: mark_harris
+    absorb: [mark]
+    why: one Hawking Institute researcher in the huey lab.
+  - id: 28
+    keep: henry_roberts
+    absorb: [henry]
+    why: both are the Australian probe's AI that Linus extracted and rebuilt.
+  - id: 29
+    keep: bridget_sheehy
+    absorb: [sheehy_b]
+    why: Dr. Sheehy is Bridget Sheehy — later Howard's wife, so this split would have propagated far.
+  - id: 30
+    keep: linus_johansson
+    absorb: [linus]
+    why: one Bob; both records tie him to the Australian probe and Henry's matrix.
+  - id: 32
+    keep: daedalus
+    absorb: [dae]
+    why: Daedalus's record already carries "Dae" as an alias; both are Icarus's partner in book 5.
+  - id: 10
+    keep: theresa-sykorski
+    absorb: [theresa_book4_54, theresa-sykorski-replicant]
+    why: >
+      one Quinlan across her death and upload. The series treats a scan as
+      continuous with the person, which is the whole premise; splitting her
+      would make the Quiniverse arc unreadable to the checkers.
+  - id: 1
+    keep: riker_will
+    absorb: [bob-2, will, will_riker, will_riker_bob]
+    why: >
+      Riker is Bob-2, who later renames himself Will to get out from under the
+      Star Trek convention. will_riker_bob's own description states the rename.
+  - id: 4
+    keep: steven_gilligan
+    absorb: [professor_gilligan, steven-gilligan]
+    why: >
+      one professor leading the megastructure consortium across books 4-5.
+      NOT including the bare `steven` record — see hold.
+
+partition:
+  - id: 2
+    keep: bob_johansson_human
+    absorb: [bob1, original_bob, bob_johannson]
+    leave_alone: [enoki_bob1_alias]
+    why: >
+      Bob Johansson, Bob-1 and Original Bob are one man and the spelling
+      "Johannson" is the extractor's typo. Enoki is held out deliberately: it is
+      Bob-1's undercover persona inside Heaven's River, and who knows that Enoki
+      is Bob-1 is a fact the epistemic checker needs to be able to get wrong.
+      Collapsing a persona into the person destroys that distinction.
+  - id: 5
+    keep: kevin
+    absorb: [kevin-the-wise]
+    leave_alone: [kevin_cryoeterna_rep]
+    why: >
+      Two game characters in book 4's dungeon crawl are one Kevin. The CryoEterna
+      sales rep is a human in a 2016 office, and Kris already ruled him separate.
+
+split:
+  - id: 17
+    members: [frieda_hurricane, frieda]
+    why: >
+      The strongest evidence in the whole set, and it is in the text: the record
+      notes Bob "explicitly confirmed" this Frieda is not the Frieda he knew.
+      The series states distinctness out loud exactly once and this is it.
+  - id: 9
+    members: [spike, spike-bill, spike-howard]
+    why: >
+      Each Bob runs his own instance of the same VR cat. The records name them
+      "Bill's version" and "Howard's version". Same precedent as Guppy.
+  - id: 20
+    members: [guppy, guppy-bob1]
+    why: every replicant has a GUPPI. Kris already ruled this one split.
+
+hold:   # Kris decides — I am not confident enough to merge or to rule out
+  - id: 12
+    members: [bender, bender-matrix]
+    question: >
+      Is "Bender's Matrix" Bender, or the hardware he is stored in? The distinction
+      matters here because the whole Bender arc is about the matrix being moved
+      while Bender is not running on it.
+  - id: 15
+    members: [general_kiroshi, kiroshi]
+    question: >
+      The records contradict on an invariant: one is a human general coordinating
+      with Richards, the other "a Bobiverse replicant". Same failure shape as
+      Charlie. One of the two descriptions is wrong.
+  - id: 25
+    members: [christie_campbell, ser_campbell]
+    question: >
+      Christie Campbell leads the Vancouver Island enclave; Ser Campbell is
+      "likely on Vulcan" with mosquitoes and gravity complaints. Could be one
+      leader in two places, could be two colonists sharing a surname.
+  - id: 31
+    members: [richards, captain_richards]
+    question: >
+      Same contradiction as Kiroshi: "Bobiverse replicant" versus "human captain",
+      in the same book-3 operation.
+  - id: 4b
+    members: [steven, steven_gilligan]
+    question: >
+      The bare `steven` is "trudging with Bridget outside Garack's Spine" — inside
+      Heaven's River, where a human professor has no business being. Either
+      Gilligan went in, or this is a different Steven.
+  - id: 2b
+    members: [enoki_bob1_alias, bob_johansson_human]
+    question: >
+      Should a character's undercover persona be its own entity? I have argued no
+      merge above, but this is a modelling decision for the whole graph, not just
+      for Enoki — Bob-1 is not the only Bob who goes under a name.
