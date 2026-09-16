@@ -133,17 +133,34 @@ merge:
 partition:
   - id: 2
     keep: bob_johansson_human
-    absorb: [bob1, original_bob, bob_johannson, robert_johansson_original]
-    leave_alone: [enoki_bob1_alias]
+    absorb: [original_bob, bob_johannson, robert_johansson_original]
+    leave_alone: [enoki_bob1_alias, bob1]
     why: >
-      Bob Johansson, Bob-1 and Original Bob are one man and the spelling
-      "Johannson" is the extractor's typo. `robert_johansson_original` is the same
-      man again, and merging it is consistent with `bob_johannson` already being in
-      this group: the series' whole premise is that the replicant is continuous
-      with the human, so splitting the original off would contradict the text. Enoki is held out deliberately: it is
-      Bob-1's undercover persona inside Heaven's River, and who knows that Enoki
-      is Bob-1 is a fact the epistemic checker needs to be able to get wrong.
-      Collapsing a persona into the person destroys that distinction.
+      CORRECTED 2026-09-16, after Kris questioned it. My first ruling merged
+      `bob1` in here too, and that was wrong. The text separates them explicitly,
+      at the moment it happens (book 1.02.1):
+        "You are a copy of the mind of Robert Johansson, created by scanning his
+         cryogenically frozen brain... a computer program that thinks it's Robert
+         Johansson. A replicant."
+        "So then I'm... that is, Bob is still alive? Or still dead?"
+        "The recording process is destructive."
+        "...the idea that I was all that was left of Bob felt like being stabbed.
+         I had been -- Bob had been -- discarded."
+      The narrator stumbles over the pronoun and corrects himself from "I" to
+      "Bob". That is the author marking the split, not incidental phrasing. Bill
+      presses the same point in 1.17.5 -- "Are you positive that you're identical
+      to original Bob?" -- and Bob-1 concedes it: "Whether or not I'm original
+      Bob, I'm original me."
+      So: `bob_johansson_human` = the human, dead. `bob1` = the first replicant,
+      alive, `parent_id` pointing at the human, which is what clone_lineage is for.
+      The three records merged here are all the human under different spellings.
+
+      And on who "Original Bob" is: the text gives that name to the HUMAN. He
+      "died in Las Vegas", "was a teenager", "went hunting with Dad", "was never
+      much for sports", and a Bob living among the Deltans says he felt more at
+      home there "than I had back on Earth as Original Bob". Every use is a
+      memory of the man, inherited by whoever is narrating. The alias has been
+      taken off `bob1` so this merge cannot be proposed again.
   - id: 5
     keep: kevin
     absorb: [kevin-the-wise]
