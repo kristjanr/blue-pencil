@@ -71,6 +71,48 @@ def _loose(s: str) -> str:
     return _ALNUM.sub("", s.lower())
 
 
+def _unescape(s: str) -> str:
+    r"""Turn a literal ``’`` back into the character it stands for.
+
+    The model quotes faithfully, but the escape sometimes survives as six
+    literal characters — and after a second JSON hop it arrives *doubled*, as
+    ``\\u2019``. That doubling is what made the settler's own decoder worse
+    than useless: its pattern matched the second backslash, consumed the
+    escape, and left the first backslash standing, so a faithful quote came
+    out as ``\’`` and matched nothing. Prose is full of curly apostrophes, so
+    this rejected real quotes as fabrications.
+    """
+    s = re.sub(r"\\{1,2}u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), s or "")
+    return s.replace("\\\\", "\\")
+
+
+def quote_in_scene(quote: str, scene_norm: str, scene_raw: str = "") -> bool:
+    """Is this quote really in this scene? The one place that decides.
+
+    There used to be two answers to this question — this one, and a weaker
+    copy inside the settler — which is how the settler came to reject 27% of
+    its proposed closes for what turned out to be punctuation. A verification
+    guard that is wrong manufactures exactly the fabrication it exists to
+    catch, so there is now a single implementation and any caller that needs a
+    different threshold passes an argument rather than forking it.
+
+    Three tests, each strictly weaker than the last, and the loose one only
+    ever *rescues* a quote the strict tests rejected — never accuses one they
+    accepted.
+    """
+    nq = _norm(_unescape(quote))
+    if not nq:
+        return False
+    # The model often trims with an ellipsis; a prefix match is still a
+    # faithful quote, so test the longest run we were actually given.
+    if nq in scene_norm or (len(nq) > 40 and nq[:40] in scene_norm):
+        return True
+    # Punctuation and whitespace are not evidence of invention. The
+    # 60-character floor is what keeps this from rescuing by coincidence.
+    lq = _loose(_unescape(quote))
+    return len(lq) > 30 and lq[:60] in _loose(scene_raw)
+
+
 def _terms(claim: str) -> set[str]:
     """The parts of a claim that paraphrase does not erase."""
     out = {re.sub(r"'s$", "", m.group(1).lower().replace("’", "'")).strip("-'")
@@ -204,16 +246,7 @@ def check_grounding(graph, *, min_terms: int = 2, common_at: float = 0.05) -> Re
             report.no_quote += 1
             quote_ok = False
         else:
-            nq = _norm(quote)
-            # The model often trims with an ellipsis; a prefix match is still a
-            # faithful quote, so test the longest run we were actually given.
-            quote_ok = nq in scene or (len(nq) > 40 and nq[:40] in scene)
-            if not quote_ok:
-                # Punctuation and whitespace are not evidence of invention. The
-                # 60-character floor is what keeps this from rescuing anything
-                # by coincidence.
-                lq = _loose(quote)
-                quote_ok = len(lq) > 30 and lq[:60] in _loose(scenes_raw.get(sid, ""))
+            quote_ok = quote_in_scene(quote, scene, scenes_raw.get(sid, ""))
 
         terms = _terms(claim) - povs.get(sid, set()) - common
         missing = []

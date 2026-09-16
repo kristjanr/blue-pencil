@@ -50,7 +50,7 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 
 from .db import Graph
-from .grounding import _norm
+from .grounding import _norm, quote_in_scene
 from .profile import SeriesProfile
 from .textstats import estimate_tokens
 
@@ -360,19 +360,6 @@ def _close(graph, promise_id: str, scene_id: str, run_id: str, confidence: float
                        (scene_id, promise_id))
 
 
-def _decode_escapes(text: str) -> str:
-    """Turn a literal ``\\u2019`` back into the character it stands for.
-
-    The model quotes faithfully but the escape sometimes survives decoding as
-    six literal characters, and prose is full of curly apostrophes. Left alone
-    this rejected 5 of 6 proposed closes in the pilot as unverifiable — the
-    verification guard manufacturing exactly the fabrication it exists to
-    catch. Nothing else is touched: a quote that is genuinely not in the scene
-    still fails.
-    """
-    return re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), text or "")
-
-
 def _distinctive(text: str) -> set[str]:
     from .grounding import _STOP, _WORD
 
@@ -444,8 +431,7 @@ def settle(
             if c.promise_id not in set(candidates):
                 report.rejected_unknown.append((scene["scene_id"], c.promise_id))
                 continue
-            nq = _norm(_decode_escapes(c.quote))
-            if not nq or nq not in scene_norm:
+            if not quote_in_scene(c.quote, scene_norm, scene["text"]):
                 report.rejected_quote.append((scene["scene_id"], c.promise_id, c.quote))
                 continue
             closed.add(c.promise_id)
@@ -558,8 +544,7 @@ def settle_batch(
             if c.promise_id not in allowed:
                 report.rejected_unknown.append((scene["scene_id"], c.promise_id))
                 continue
-            nq = _norm(_decode_escapes(c.quote))
-            if not nq or nq not in scene_norm:
+            if not quote_in_scene(c.quote, scene_norm, scene["text"]):
                 report.rejected_quote.append((scene["scene_id"], c.promise_id, c.quote))
                 continue
             report.closes.append((scene["scene_id"], c.promise_id, c.why, c.confidence))

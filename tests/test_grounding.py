@@ -195,3 +195,49 @@ def test_demotion_records_nothing_when_it_changes_nothing(world):
     demote_unproven(graph, check_grounding(graph), run_id="second")
     assert graph.changes_in_run("first")
     assert graph.changes_in_run("second") == []
+
+
+# --------------------------------------------------------------- quote fidelity
+#: The real line from the corpus, curly apostrophe and all.
+_SCENE = ("Riker leaned back. “I can’t forget the feeling of being "
+          "controlled. It was like being able to feel a tapeworm moving around "
+          "inside your skull.” He shuddered.")
+
+
+def _verify(quote: str) -> bool:
+    from bp.grounding import _norm, quote_in_scene
+
+    return quote_in_scene(quote, _norm(_SCENE), _SCENE)
+
+
+def test_a_quote_that_is_simply_there_verifies():
+    assert _verify("I can’t forget the feeling of being controlled.")
+
+
+def test_a_doubled_unicode_escape_is_not_a_fabrication():
+    """The bug that rejected 27% of the settler's proposed closes.
+
+    Model output carries the escape through literally, and a second JSON hop
+    doubles the backslash. The old decoder matched the *second* backslash,
+    consumed the escape and left the first one standing — turning a faithful
+    quote into one that matched nothing.
+    """
+    assert _verify("I can\\\\u2019t forget the feeling of being controlled.")
+    assert _verify("I can\\u2019t forget the feeling of being controlled.")
+
+
+def test_a_stray_backslash_mid_word_is_rescued_not_accused():
+    """`we\\were` in the pilot: a lost space, not an invented quote."""
+    assert _verify("I can\\\\u2019t forget the feeling of being controlled. It was "
+                   "like being able to feel a\\tapeworm moving around inside your skull.")
+
+
+def test_an_invented_quote_still_fails():
+    """The guard has to keep working, or loosening it is just switching it off."""
+    assert not _verify("I have never felt more in control of my own mind.")
+    assert not _verify("")
+
+
+def test_a_short_quote_is_not_rescued_by_coincidence():
+    """Below the floor, loose matching would accept near-anything."""
+    assert not _verify("I’t f")
