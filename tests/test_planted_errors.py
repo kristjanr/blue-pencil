@@ -59,11 +59,20 @@ PLANTED = [
 ]
 
 
-def _scorecard(world, name, card=None):
+#: Longwater is built, not ingested: every event, report and observer in it is
+#: recorded on purpose, so a missing information path really is a missing one.
+#: Saying so is what lets "nobody survived to send it" stay a hard finding here
+#: while the same branch abstains on a real corpus, where propagation is
+#: recorded for only a fraction of events.
+COMPLETE_WORLD = {"checks": {"epistemic": {"severity": "hard", "paths_are_complete": True}}}
+
+
+def _scorecard(world, name, card=None, policy=None):
     graph, profile = world
     draft = Draft.load(CHAPTERS / f"{name}.md")
     return draft, run_checks(CheckContext(
-        draft=draft, graph=graph, profile=profile, policy=RunPolicy.from_dict({}), card=card,
+        draft=draft, graph=graph, profile=profile,
+        policy=policy or RunPolicy.from_dict(COMPLETE_WORLD), card=card,
     ))
 
 
@@ -136,3 +145,60 @@ def test_clean_chapter_is_gate_clean(world):
 def test_planted_chapter_is_not_gate_clean(world, card):
     _, sc = _scorecard(world, "planted", card)
     assert not sc.clean
+
+
+def test_an_untraceable_path_is_a_note_unless_the_graph_is_complete(world, card):
+    """The defect this test exists for: `_violation` reported ignorance as a
+    violation. On the real book 6 that produced 161 of 168 hard findings, and
+    not one of them had computed an arrival date — the check never once showed
+    that information could not arrive, it reported 161 times that it could not
+    trace how it did.
+
+    Whether absence proves anything is a property of the corpus, so it is
+    declared. Default off: a graph that records propagation for a fraction of
+    its events cannot conclude anything from silence."""
+    from bp.policy import RunPolicy as RP
+
+    _, complete = _scorecard(world, "planted", card)
+    _, sparse = _scorecard(world, "planted", card, policy=RP.from_dict({}))
+
+    def untraceable(sc):
+        return [m for m in sc.marginalia
+                if m.check == "epistemic" and m.metric.get("earliest_arrival_day") == -1.0]
+
+    assert untraceable(complete), "the fixture plants paths that genuinely do not exist"
+    assert all(m.severity == "hard" for m in untraceable(complete)), \
+        "in a graph that records every report, no path really is no path"
+    assert all(m.severity == "note" for m in untraceable(sparse)), \
+        "without that guarantee, not-found is the checker abstaining"
+
+    # The computed branch is unaffected either way — it proved its finding.
+    computed = [m for m in sparse.marginalia
+                if m.check == "epistemic" and m.metric.get("earliest_arrival_day", -1.0) > 0]
+    assert computed and all(m.severity == "hard" for m in computed)
+
+
+def test_a_dead_faction_is_not_a_resurrection(world):
+    """`the Pav is recorded dead but acts in this chapter` — the Pav being a
+    species, not somebody who could be restored from backup. Only a character
+    can be wrongly un-dead; a disbanded faction reappearing is a different
+    question, and the checker has no business calling it a hard finding."""
+    from bp.checks.objects import ObjectAndBodyCheck
+    from bp.models import Citation, Entity
+
+    graph, profile = world
+    cit = [Citation(scene=graph.scenes()[0].scene_id, quote="q")]
+    graph.write_entity(Entity(entity_id="the_pav", name="Pavlov", kind="faction",
+                              status="dead", citations=cit))
+    graph.write_entity(Entity(entity_id="dead_captain", name="Kessring", kind="character",
+                              status="dead", citations=cit))
+    graph.commit()
+
+    draft = Draft.parse("Pavlov attacked the convoy. Kessring attacked the convoy too.\n")
+    draft.meta = {"pov": "Ana", "date": "2185-01-01", "place": "Sol"}
+    ctx = CheckContext(draft=draft, graph=graph, profile=profile,
+                       policy=RunPolicy.from_dict({}))
+    named = {m.message.split()[0] for m in ObjectAndBodyCheck().run(ctx)}
+
+    assert "Kessring" in named, "a dead character acting on the page is the real finding"
+    assert "Pavlov" not in named, "a faction is not somebody who can be resurrected"

@@ -38,6 +38,13 @@ class ObjectAndBodyCheck:
             row = ctx.graph.entity(mention.target_id)
             if row is None or row["status"] != "dead":
                 continue
+            # Only somebody who could be restored can be wrongly un-dead. A
+            # faction, place or ship recorded "dead" means disbanded or
+            # destroyed, and it reappearing is a different question entirely —
+            # on the real corpus this fired as "the Pav is recorded dead but
+            # acts in this chapter", the Pav being a species.
+            if row["kind"] not in ("character", ""):
+                continue
             # A dead character being *spoken about* is fine; being on the page is not.
             if not self._appears_acting(ctx, mention.label):
                 continue

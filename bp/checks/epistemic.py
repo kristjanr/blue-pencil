@@ -122,6 +122,19 @@ class EpistemicCheck:
         people.discard("")
         return people
 
+    def _paths_are_complete(self, ctx: CheckContext) -> bool:
+        """Whether a missing information path in this graph means there isn't one.
+
+        A property of the corpus, not a matter of taste, which is why it is
+        declared rather than guessed. In a small fully-extracted world every
+        report is recorded, so "nobody survived to send it" is a fact the graph
+        can prove. Across five ingested novels it is not: propagation is
+        recorded for a fraction of events, and absence carries no information.
+        Default off — the engine assumes its own record is incomplete, because
+        that is the assumption that fails safe.
+        """
+        return bool(ctx.policy.check(self.name).options.get("paths_are_complete", False))
+
     def _violation(self, ctx: CheckContext, mention, row, blocked: list, when) -> Marginalium:
         """One mark per reference, naming everyone it is wrong for."""
         cites = ctx.graph.citations_for("event", row["event_id"])
@@ -134,8 +147,18 @@ class EpistemicCheck:
             gap = soonest - when.hi
             why = (f"the earliest any of them could know is {ctx.fmt(soonest)} "
                    f"({first_who}, {gap:,.0f} days after this chapter) — {ctx.kg.explain(first_k)}")
+        elif self._paths_are_complete(ctx):
+            why = "there is no information path to any of them"
         else:
-            why = "there is no recorded information path to any of them"
+            # No path *found* is not a demonstrated violation unless the graph
+            # is known to record propagation exhaustively. On a real corpus it
+            # does not: "I cannot trace how the news travelled" is the normal
+            # case for an event a few books old. Measured on the real book 6,
+            # 161 of 168 hard findings came down this branch and not one had
+            # computed an arrival date — the check never once demonstrated that
+            # information could not arrive, it reported 161 times that it could
+            # not trace how it did.
+            why = "no information path to any of them is recorded, so this cannot be decided here"
 
         couriers = [c for c, _ in ctx.kg.who_could_know(row["event_id"], when.hi)
                     if c not in {w for w, _ in blocked}][:4]
@@ -148,7 +171,15 @@ class EpistemicCheck:
             "cut it",
         ]
         return Marginalium(
-            check=self.name, severity="hard", scene_ref=ctx.draft.ref, line=mention.line,
+            check=self.name,
+            # A finding needs something positively computed behind it: either
+            # an arrival date, or a graph whose propagation records are known
+            # to be complete, which makes the absence itself the computation.
+            # Otherwise `note` — the checker abstaining, which run_checks never
+            # promotes, so the policy cannot turn "I could not trace it" into a
+            # hard stop on someone else's behalf.
+            severity="hard" if (soonest is not None or self._paths_are_complete(ctx)) else "note",
+            scene_ref=ctx.draft.ref, line=mention.line,
             excerpt=mention.excerpt,
             message=(f"{who_list} refer{'s' if len(blocked) == 1 else ''} to {row['summary']!r} "
                      f"(event {row['event_id']}), but {why}."),

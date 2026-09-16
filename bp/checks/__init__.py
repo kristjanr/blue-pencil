@@ -185,6 +185,19 @@ def run_checks(ctx: CheckContext, *, only: list[str] | None = None) -> Scorecard
     is a hard stop in one run and a note in another, and that is the editor's
     call rather than ours. A checker that raises is reported as stood-down
     rather than taking the chapter down with it.
+
+    The one severity a checker keeps for itself is ``note``, and that asymmetry
+    is load-bearing. **A checker may only report a finding it has positively
+    computed; not-found is always a note.** Every false-alarm class found so
+    far has been the same mistake — reading absence of evidence as evidence of
+    absence: an uncited second reading counted as a contradiction, a quote
+    missing from the graph counted as fabricated, a name mentioned counted as
+    present, and an information path the graph never recorded counted as an
+    impossible one. That last cost 161 of 168 hard findings on the first real
+    run. The deterministic arithmetic has never been wrong; deciding what
+    silence means is what keeps failing. So a checker that cannot compute an
+    answer says ``note``, and the policy never promotes it — the editor cannot
+    be handed a hard stop the checker could not actually demonstrate.
     """
     card = Scorecard()
     for name, check in all_checks().items():
