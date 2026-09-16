@@ -16,6 +16,20 @@ space:
   distances: data/bobiverse-systems.csv
   places: data/bobiverse-places.csv
   travel_speed: 0.5c               # what a von Neumann probe manages under drive
+  # A transit shortcut that appears partway through the series, which is why this
+  # list exists at all. Until book 5 a journey is ships under drive and an
+  # over-long one is a real contradiction. From book 5 the WormNet is open
+  # (`b5.59.2.drone_transit_test`, `b5.64.1.wormnet_opening`) and a crossing the
+  # sublight budget cannot explain may simply have gone through a wormhole.
+  #
+  # Deliberately no topology. We do not know which systems the network joins or
+  # when it reached them, and a guessed one would be worse than none: it would
+  # clear journeys that really are impossible, which is the expensive direction
+  # to be wrong in. Naming the mechanism only downgrades the finding to a note —
+  # it never clears anything. If a real topology ever exists, connected pairs can
+  # go back to being hard failures.
+  channels:
+    - {name: wormhole, available_from: "book 5"}
 
 information:
   # The whole reason this file exists. Light-lag versus an instant relay is

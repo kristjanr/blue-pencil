@@ -53,6 +53,24 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
+_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+def _loose(s: str) -> str:
+    """Strip everything but letters and digits.
+
+    The fallback for quote fidelity, and only ever used to *rescue* a quote the
+    strict test rejected — never to accuse one it accepted. Measured on the real
+    corpus, 156 of 391 "quotes that appear nowhere" were punctuation artefacts:
+    a curly quotation mark the model put at the wrong end of the line, an
+    interjection whose quote marks it dropped, and — in one case — a scene whose
+    own text reads "Iwas", a space lost to drop-cap handling at ingest. None of
+    those is an invented quote, and counting them as such demoted records that
+    could prove themselves perfectly well.
+    """
+    return _ALNUM.sub("", s.lower())
+
+
 def _terms(claim: str) -> set[str]:
     """The parts of a claim that paraphrase does not erase."""
     out = {re.sub(r"'s$", "", m.group(1).lower().replace("’", "'")).strip("-'")
@@ -134,9 +152,10 @@ def check_grounding(graph, *, min_terms: int = 2, common_at: float = 0.05) -> Re
     more than this fraction of scenes cannot discriminate between scenes, so it
     is dropped from the test.
     """
-    scenes, povs = {}, {}
+    scenes, povs, scenes_raw = {}, {}, {}
     for r in graph.conn.execute("SELECT scene_id, text, pov FROM scenes"):
         scenes[r["scene_id"]] = _norm(r["text"])
+        scenes_raw[r["scene_id"]] = r["text"]
         # A first-person scene never names its own narrator: Bill's chapter says
         # "I", not "Bill". Requiring the POV name to appear in its own scene
         # manufactures a failure out of the series' own narration.
@@ -189,6 +208,12 @@ def check_grounding(graph, *, min_terms: int = 2, common_at: float = 0.05) -> Re
             # The model often trims with an ellipsis; a prefix match is still a
             # faithful quote, so test the longest run we were actually given.
             quote_ok = nq in scene or (len(nq) > 40 and nq[:40] in scene)
+            if not quote_ok:
+                # Punctuation and whitespace are not evidence of invention. The
+                # 60-character floor is what keeps this from rescuing anything
+                # by coincidence.
+                lq = _loose(quote)
+                quote_ok = len(lq) > 30 and lq[:60] in _loose(scenes_raw.get(sid, ""))
 
         terms = _terms(claim) - povs.get(sid, set()) - common
         missing = []

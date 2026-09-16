@@ -107,3 +107,48 @@ def test_demotion_is_idempotent(world):
     second = demote_unproven(graph, check_grounding(graph))
     assert first.get("event", 0) >= 1
     assert second.get("event", 0) == 0, "a second run must be a no-op"
+
+
+def test_punctuation_is_not_evidence_of_invention(world):
+    """The bug this test exists for: 156 of 391 "quotes that appear nowhere in
+    the corpus" were punctuation artefacts — a curly quotation mark placed at
+    the wrong end of the line, an interjection whose quote marks the model
+    dropped. Each one demoted a record that could prove itself perfectly well,
+    and the 391 was a number quoted to the project's owner repeatedly."""
+    graph, _ = world
+    scene = graph.scenes()[0]
+    real = " ".join(scene.text.split()[:14])
+
+    graph.write_event(Event(
+        event_id="E-punct", summary="quoted with the marks moved", when="2186-01-01",
+        where="Sol", observed_by=["Ana"],
+        citations=[Citation(scene=scene.scene_id, quote=f'"{real}')]))
+    graph.write_event(Event(
+        event_id="E-invented", summary="not in the text at all", when="2186-01-01",
+        where="Sol", observed_by=["Ana"],
+        citations=[Citation(scene=scene.scene_id,
+                            quote="a sentence that appears nowhere in this corpus whatsoever")]))
+    graph.commit()
+
+    rep = check_grounding(graph)
+    bad = {f.record_id for f in rep.findings if not f.quote_ok}
+    assert "E-punct" not in bad, "a stray quotation mark is not a fabricated quote"
+    assert "E-invented" in bad, "but an invented one must still be caught"
+
+
+def test_the_rescue_needs_real_overlap_not_a_coincidence(world):
+    """The loose comparison only ever rescues; a short or unrelated string must
+    not slip through it."""
+    from bp.grounding import _loose
+
+    graph, _ = world
+    scene = graph.scenes()[0]
+    graph.write_event(Event(
+        event_id="E-short", summary="too little to match on", when="2186-01-01",
+        where="Sol", observed_by=["Ana"],
+        citations=[Citation(scene=scene.scene_id, quote="the and a")]))
+    graph.commit()
+
+    rep = check_grounding(graph)
+    assert "E-short" in {f.record_id for f in rep.findings if not f.quote_ok}
+    assert len(_loose("the and a")) <= 30
