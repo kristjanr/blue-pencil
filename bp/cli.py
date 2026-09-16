@@ -240,6 +240,33 @@ def cmd_settle(args) -> int:
     return 0
 
 
+def cmd_batch(args) -> int:
+    """Look in on a submitted batch without owning the poller.
+
+    A batched run holds its own connection for hours; this is the way to ask
+    "is it moving, or is it stuck?" from another terminal, which is exactly the
+    question a multi-hour run raises and cannot answer about itself.
+    """
+    client = _client_or_none(True)
+    if args.what == "list":
+        for b in client.messages.batches.list(limit=args.limit).data:
+            c = b.request_counts
+            _echo(f"  {b.id}  {b.processing_status:10}  "
+                  f"ok {c.succeeded} · err {c.errored} · left {c.processing}  {b.created_at}")
+        return 0
+
+    if not args.batch_id:
+        _echo("give a batch id, or use `bp batch list`")
+        return 1
+    b = client.messages.batches.retrieve(args.batch_id)
+    c = b.request_counts
+    _echo(f"{b.id}\n  status     {b.processing_status}\n  created    {b.created_at}\n"
+          f"  ended      {b.ended_at or '—'}\n  expires    {b.expires_at}\n"
+          f"  succeeded  {c.succeeded}\n  errored    {c.errored}\n"
+          f"  canceled   {c.canceled}\n  expired    {c.expired}\n  processing {c.processing}")
+    return 0
+
+
 def cmd_cast(args) -> int:
     from .extract import rebuild_scene_cast
 
@@ -798,6 +825,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--batch", action="store_true", help="submit through the Batch API at half price")
     sp.add_argument("--book", default=None, help="settle one book (the real pass runs book by book)")
     sp.set_defaults(func=cmd_settle)
+
+    sp = sub.add_parser("batch", help="look in on a submitted Batch API job")
+    sp.add_argument("what", choices=["status", "list"], nargs="?", default="status")
+    sp.add_argument("batch_id", nargs="?", default=None)
+    sp.add_argument("--limit", type=int, default=10)
+    sp.set_defaults(func=cmd_batch)
 
     sp = sub.add_parser("cast", help="rebuild scene cast from cited events (no model, no cost)")
     common(sp)
