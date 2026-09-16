@@ -57,11 +57,23 @@ class GeographyCheck:
             available = when.hi - from_day
             if needed <= available:
                 continue
+            # Once the series has a transit mechanism the profile cannot
+            # price, an over-long journey is no longer something this check can
+            # demonstrate to be impossible. It carries no topology on purpose:
+            # we do not know which systems a wormhole network joins or when,
+            # and a guessed topology would clear journeys that really are
+            # impossible — the expensive direction. So it abstains and says
+            # why, and stays hard for everything before that date.
+            shortcut = ctx.profile.space.shortcut_at(when.hi)
             out.append(Marginalium(
-                check=self.name, severity="hard", scene_ref=ctx.draft.ref, line=1 + ctx.draft.body_offset,
+                check=self.name,
+                severity="note" if shortcut else "hard",
+                scene_ref=ctx.draft.ref, line=1 + ctx.draft.body_offset,
                 message=(f"{who} was at {from_place} on {ctx.fmt(from_day)} and is at {place} here "
                          f"({ctx.fmt(when.hi)}). That journey needs {needed:,.0f} days; only "
-                         f"{available:,.0f} are available."),
+                         f"{available:,.0f} are available."
+                         + (f" Cannot be decided: {shortcut} exists by this date and the profile "
+                            f"does not say where it reaches." if shortcut else "")),
                 fixes=[f"date the chapter no earlier than {ctx.fmt(from_day + needed)}",
                        "put the journey on the page, or use a faster conveyance the profile knows about",
                        "set the chapter somewhere reachable"],

@@ -191,6 +191,17 @@ class SeriesProfile:
                 if book.casefold() == key or book.casefold().endswith(key) or key in book.casefold():
                     ch.available_from_date = Span.at(start)
                     break
+        # Transit shortcuts resolve the same way, and must: a wormhole network
+        # that appears in book 5 makes an over-long journey unpriceable from
+        # that date on, and only from that date on.
+        for name, from_book in self.space.transit_from:
+            if name in self.space.transit_from_day or not from_book:
+                continue
+            key = from_book.strip().casefold()
+            for book, start in book_start_days.items():
+                if book.casefold() == key or book.casefold().endswith(key) or key in book.casefold():
+                    self.space.transit_from_day[name] = start
+                    break
 
     def evidence_report(self) -> list[str]:
         """Human-readable summary of what the profile asserts, for confirmation."""

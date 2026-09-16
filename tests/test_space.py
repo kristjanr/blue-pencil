@@ -63,3 +63,56 @@ def test_distance_files_tolerate_comments_and_reject_bad_numbers(tmp_path):
     path.write_text("from,to,light_years\nSol,Vela,not-a-number\n")
     with pytest.raises(ProfileError):
         SpaceModel.load({"model": "interstellar", "distances": "d.csv"}, base=tmp_path)
+
+
+def test_a_transit_shortcut_downgrades_an_impossible_journey_to_a_note(world):
+    """Book 5 introduces wormholes and `space` had no way to say so: a single
+    travel_speed cannot express "and then this became possible". Once a transit
+    mechanism exists that the profile cannot price, an over-long journey is
+    something the checker cannot demonstrate is impossible — so it abstains and
+    names the reason, rather than reporting a contradiction it cannot show.
+
+    Deliberately carries no topology. A guessed one would clear journeys that
+    really are impossible, which is the expensive direction.
+    """
+    from bp.checks.geography import GeographyCheck
+    from bp.draftdoc import Draft
+    from bp.checks import CheckContext
+    from bp.policy import RunPolicy
+    from bp.timeline import Span
+
+    graph, profile = world
+    far = max(profile.space.pairs.values())
+    assert far > 0
+
+    def run():
+        draft = Draft.parse("Cyra is here, impossibly.\n")
+        draft.meta = {"pov": "Ana", "date": "2185-06-01", "place": "Sol"}
+        ctx = CheckContext(draft=draft, graph=graph, profile=profile,
+                           policy=RunPolicy.from_dict({}))
+        return GeographyCheck().run(ctx)
+
+    before = run()
+    profile.space.transit_from = [("the gate network", "book 1")]
+    profile.space.transit_from_day = {"the gate network": 0.0}
+    after = run()
+
+    assert {m.severity for m in before} <= {"hard", "note"}
+    if any(m.severity == "hard" for m in before):
+        assert all(m.severity == "note" for m in after), \
+            "with an unpriceable shortcut in play the check must abstain"
+        assert any("cannot be decided" in m.message.lower() for m in after)
+
+
+def test_a_shortcut_that_does_not_exist_yet_changes_nothing():
+    """It abstains from the date the mechanism appears, and not before —
+    otherwise books 1-4, where an over-long journey really is a contradiction,
+    would stop being checked."""
+    from bp.space import SpaceModel
+
+    sm = SpaceModel(model="interstellar")
+    sm.transit_from = [("wormholes", "book 5")]
+    sm.transit_from_day = {"wormholes": 1000.0}
+    assert sm.shortcut_at(999.0) == ""
+    assert sm.shortcut_at(1000.0) == "wormholes"
+    assert sm.shortcut_at(None) == ""
