@@ -202,7 +202,7 @@ def cmd_settle(args) -> int:
         graph.close()
         return 0
 
-    from .settle import settle
+    from .settle import settle, settle_batch
 
     model = args.model or ws.load_policy(args.run).model_for("judge")
     scene_ids = None
@@ -214,7 +214,8 @@ def cmd_settle(args) -> int:
     _echo(f"model {model} · cap ${args.max_usd:,.2f} · "
           f"{len(scene_ids) if scene_ids else 'all'} scenes"
           + ("" if args.apply else " · DRY RUN"))
-    report = settle(graph, profile, _client_or_none(True), model=model,
+    runner = settle_batch if args.batch else settle
+    report = runner(graph, profile, _client_or_none(True), model=model,
                     scene_ids=scene_ids, max_usd=args.max_usd,
                     apply=args.apply, progress=_echo)
     _echo("")
@@ -783,6 +784,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--max-usd", type=float, default=1.0, dest="max_usd")
     sp.add_argument("--apply", action="store_true", help="write the closes; default is a dry run")
     sp.add_argument("--json", default=None, help="write the complete result here, untruncated")
+    sp.add_argument("--batch", action="store_true", help="submit through the Batch API at half price")
     sp.set_defaults(func=cmd_settle)
 
     sp = sub.add_parser("cast", help="rebuild scene cast from cited events (no model, no cost)")

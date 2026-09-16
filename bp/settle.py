@@ -399,3 +399,124 @@ def settle(
     if apply:
         graph.conn.commit()
     return report
+
+
+#: `estimate_tokens` is a words-to-tokens approximation and it runs light on
+#: this shape of prompt — a long list of short, id-heavy lines. Measured
+#: against the pilot it under-reported by about 2.3x once output tokens were
+#: counted too. A spend cap checked against an estimate that optimistic is not
+#: a cap, so the estimate carries the measured factor and the cap is applied to
+#: the honest number. Re-measure this if the prompt shape changes.
+_ESTIMATE_SLACK = 2.3
+
+
+def settle_batch(
+    graph: Graph, profile: SeriesProfile, client, *, model: str,
+    scene_ids: list[str] | None = None, max_usd: float = 10.0,
+    apply: bool = False, progress=lambda _s: None,
+) -> SettleReport:
+    """The same question, submitted through the Batch API at half price.
+
+    One trade is unavoidable here. Batching submits every scene at once, so a
+    promise closed in scene 3 is still offered to scene 40 — the drop-as-closed
+    saving does not apply within a batch. What it costs in tokens it more than
+    returns in price, and the saving it forgoes can be measured after the fact
+    from the closes themselves rather than paid for to discover.
+
+    Estimated before submitting and refused if it would exceed ``max_usd``,
+    because a batch cannot be stopped halfway once it is running.
+    """
+    from .extract import _custom_id
+    from .llm import BATCH_DISCOUNT, Usage, poll_batch, rate_for, submit_batch
+
+    index, _ = candidate_index(graph, profile)
+    rows = {r["promise_id"]: dict(r) for r in graph.conn.execute(
+        "SELECT promise_id, summary FROM promises WHERE status='open'")}
+    scenes = [dict(r) for r in graph.conn.execute(
+        "SELECT scene_id, text, tokens FROM scenes ORDER BY ord")]
+    if scene_ids is not None:
+        keep = set(scene_ids)
+        scenes = [s for s in scenes if s["scene_id"] in keep]
+
+    schema = _Settlement.model_json_schema()
+    tool = {"name": "emit", "description": "Emit a Settlement.", "input_schema": schema}
+    requests, prompts = [], {}
+    for s in scenes:
+        cands = [p for p in index.get(s["scene_id"], []) if p in rows]
+        if not cands:
+            continue
+        listing = "\n".join(f"- {p}: {rows[p]['summary']}" for p in cands)
+        prompt = (f"--- SCENE {s['scene_id']} ---\n{s['text']}\n\n"
+                  f"--- PROMISES PLANTED BEFORE THIS SCENE ---\n{listing}")
+        cid = _custom_id("settle", s["scene_id"])
+        prompts[cid] = (s, set(cands))
+        requests.append({
+            "custom_id": cid,
+            "params": {
+                "model": model, "max_tokens": 4_000,
+                "system": [{"type": "text", "text": SETTLE_SYSTEM}],
+                "tools": [tool], "tool_choice": {"type": "tool", "name": "emit"},
+                "messages": [{"role": "user", "content": prompt}],
+            },
+        })
+
+    report = SettleReport()
+    if len(prompts) != len(requests):
+        raise ValueError("two scene ids collide as one batch custom_id")
+
+    rate_in, _rate_out = rate_for(model)
+    estimate = (sum(estimate_tokens(r["params"]["messages"][0]["content"])
+                    for r in requests) / 1e6 * rate_in * BATCH_DISCOUNT) * _ESTIMATE_SLACK
+    progress(f"  {len(requests)} scenes · estimated ${estimate:,.2f} batched")
+    if estimate > max_usd:
+        report.stopped = (f"estimated ${estimate:,.2f} exceeds the ${max_usd:,.2f} cap; "
+                          f"a batch cannot be stopped once submitted, so it was not sent")
+        return report
+
+    batch_id = submit_batch(client, requests)
+    progress(f"  batch {batch_id} submitted; polling")
+    usage = Usage()
+    for result in poll_batch(client, batch_id):
+        entry = prompts.get(result.custom_id)
+        if entry is None:
+            continue
+        scene, allowed = entry
+        if result.result.type != "succeeded":
+            report.errors.append(f"{scene['scene_id']}: {result.result.type}")
+            continue
+        msg = result.result.message
+        usage.add(model, msg.usage, stage="settle", batch=True)
+        report.scenes_read += 1
+        payload = next((b.input for b in msg.content if getattr(b, "type", "") == "tool_use"), None)
+        if payload is None:
+            continue
+        try:
+            out = _Settlement.model_validate(payload)
+        except Exception as exc:
+            report.errors.append(f"{scene['scene_id']}: {type(exc).__name__}: {exc}")
+            continue
+
+        scene_norm = _norm(scene["text"])
+        for c in out.closes:
+            if c.promise_id not in allowed:
+                report.rejected_unknown.append((scene["scene_id"], c.promise_id))
+                continue
+            nq = _norm(_decode_escapes(c.quote))
+            if not nq or nq not in scene_norm:
+                report.rejected_quote.append((scene["scene_id"], c.promise_id, c.quote))
+                continue
+            report.closes.append((scene["scene_id"], c.promise_id, c.why, c.confidence))
+            shared = _distinctive(rows[c.promise_id]["summary"]) & _distinctive(scene["text"])
+            if shared:
+                report.echoed += 1
+            else:
+                report.unechoed += 1
+            if apply:
+                graph.conn.execute(
+                    "UPDATE promises SET status='paid', paid_in=? WHERE promise_id=?",
+                    (scene["scene_id"], c.promise_id))
+
+    report.usd = usage.usd
+    if apply:
+        graph.conn.commit()
+    return report
