@@ -206,6 +206,17 @@ def cmd_settle(args) -> int:
 
     model = args.model or ws.load_policy(args.run).model_for("judge")
     scene_ids = None
+    if args.book:
+        # Settling runs book by book for the real pass: closing a promise early
+        # shrinks every later listing, and the listing is 96% of the cost.
+        scene_ids = [r["scene_id"] for r in graph.conn.execute(
+            "SELECT scene_id FROM scenes WHERE book_id=? ORDER BY ord", (args.book,))]
+        if not scene_ids:
+            books = [r[0] for r in graph.conn.execute(
+                "SELECT DISTINCT book_id FROM scenes ORDER BY book_id")]
+            _echo(f"no book {args.book!r} in this graph; have: {', '.join(books)}")
+            graph.close()
+            return 1
     if args.sample:
         rows = [r["scene_id"] for r in graph.conn.execute(
             "SELECT scene_id FROM scenes ORDER BY ord")]
@@ -785,6 +796,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--apply", action="store_true", help="write the closes; default is a dry run")
     sp.add_argument("--json", default=None, help="write the complete result here, untruncated")
     sp.add_argument("--batch", action="store_true", help="submit through the Batch API at half price")
+    sp.add_argument("--book", default=None, help="settle one book (the real pass runs book by book)")
     sp.set_defaults(func=cmd_settle)
 
     sp = sub.add_parser("cast", help="rebuild scene cast from cited events (no model, no cost)")
