@@ -246,6 +246,27 @@ class SettleReport:
     stopped: str = ""
     errors: list[str] = field(default_factory=list)
 
+    def as_dict(self) -> dict:
+        """The whole result, not the first 25 of it.
+
+        `render` truncates for reading; comparing two runs needs every close,
+        and a console tail is not a record. Learned by compromising exactly
+        that comparison.
+        """
+        return {
+            "scenes_read": self.scenes_read,
+            "usd": round(self.usd, 4),
+            "stopped": self.stopped,
+            "closes": [{"scene": s, "promise_id": p, "why": w, "confidence": c}
+                       for s, p, w, c in self.closes],
+            "rejected_quote": [{"scene": s, "promise_id": p, "quote": q}
+                               for s, p, q in self.rejected_quote],
+            "rejected_unknown": [{"scene": s, "promise_id": p} for s, p in self.rejected_unknown],
+            "echoed": self.echoed,
+            "unechoed": self.unechoed,
+            "errors": self.errors,
+        }
+
     def render(self) -> str:
         lines = [
             f"{self.scenes_read} scenes read · {len(self.closes)} promise(s) closed · ${self.usd:,.2f}",

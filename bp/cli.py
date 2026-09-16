@@ -218,6 +218,9 @@ def cmd_settle(args) -> int:
                     scene_ids=scene_ids, max_usd=args.max_usd,
                     apply=args.apply, progress=_echo)
     _echo("")
+    if args.json:
+        Path(args.json).write_text(json.dumps(report.as_dict(), indent=2), encoding="utf-8")
+        _echo(f"full result written to {args.json}")
     _echo(report.render())
     if not args.apply:
         _echo("\ndry run — nothing written. Re-run with --apply to close these.")
@@ -779,6 +782,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--model", default=None)
     sp.add_argument("--max-usd", type=float, default=1.0, dest="max_usd")
     sp.add_argument("--apply", action="store_true", help="write the closes; default is a dry run")
+    sp.add_argument("--json", default=None, help="write the complete result here, untruncated")
     sp.set_defaults(func=cmd_settle)
 
     sp = sub.add_parser("cast", help="rebuild scene cast from cited events (no model, no cost)")
