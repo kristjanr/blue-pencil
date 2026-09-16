@@ -147,7 +147,7 @@ def build(db_path: str | Path = ":memory:") -> tuple[Graph, SeriesProfile]:
     """A fully populated graph: scenes, entities, events with information paths,
     objects, promises, threads, and measured style specs."""
     profile = make_profile()
-    graph = Graph(db_path, profile)
+    graph = Graph(db_path, profile, create=True)
 
     for i, (book, chapter, pov, place, date) in enumerate(SCENES):
         graph.add_book(book, book, int(book[-1]))

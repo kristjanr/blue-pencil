@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from .errors import UncitedClaim
+from .errors import GraphNotFound, UncitedClaim
 from .models import (
     Citation,
     ChapterCard,
@@ -334,8 +334,21 @@ class SceneRow:
 class Graph:
     """Handle on the story graph. Every write goes through here."""
 
-    def __init__(self, path: str | Path, profile: SeriesProfile | None = None):
+    def __init__(self, path: str | Path, profile: SeriesProfile | None = None,
+                 *, create: bool = False):
         self.path = Path(path)
+        # Creating on demand is how a mistyped profile turns into a clean bill
+        # of health: the new graph is empty, and an empty graph answers every
+        # question plausibly and wrongly. Only `bp init` and `bp ingest` have
+        # any business making one. Non-existence is the right thing to key on
+        # rather than emptiness — a freshly ingested graph is legitimately
+        # sparse, so a rule counting rows would eventually fire on real work
+        # and get silenced.
+        if not create and str(self.path) != ":memory:" and not self.path.exists():
+            raise GraphNotFound(
+                f"no graph at {self.path}. Run `bp ingest` to build one, or pass "
+                f"--profile/--db to point at an existing graph."
+            )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.profile = profile
         self.conn = sqlite3.connect(self.path)

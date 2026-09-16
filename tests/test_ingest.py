@@ -9,7 +9,7 @@ def test_ingest_end_to_end(tmp_path):
 
     corpus = synthetic.write_corpus(tmp_path / "corpus")
     profile = synthetic.make_profile()
-    graph = Graph(tmp_path / "g.sqlite", profile)
+    graph = Graph(tmp_path / "g.sqlite", profile, create=True)
     report = ingest(corpus, graph, profile)
 
     assert report.books == 3 and report.scenes >= 12
@@ -25,7 +25,7 @@ def test_ingest_is_idempotent(tmp_path):
 
     corpus = synthetic.write_corpus(tmp_path / "corpus")
     profile = synthetic.make_profile()
-    graph = Graph(tmp_path / "g.sqlite", profile)
+    graph = Graph(tmp_path / "g.sqlite", profile, create=True)
     first = ingest(corpus, graph, profile)
     second = ingest(corpus, graph, profile)
     assert first.scenes == second.scenes
@@ -39,7 +39,7 @@ def test_ingest_builds_retrieval_indexes(tmp_path):
 
     corpus = synthetic.write_corpus(tmp_path / "corpus")
     profile = synthetic.make_profile()
-    graph = Graph(tmp_path / "g.sqlite", profile)
+    graph = Graph(tmp_path / "g.sqlite", profile, create=True)
     ingest(corpus, graph, profile)
 
     hits = Retriever(graph).search("vault sealed cradle")

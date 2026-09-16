@@ -58,11 +58,32 @@ class Workspace:
     def db_path(self, profile_name: str) -> Path:
         return self.graph_dir / f"{profile_name}.sqlite"
 
-    def load_profile(self, name: str) -> SeriesProfile:
+    def available_profiles(self) -> list[str]:
+        return sorted(p.stem for p in self.profiles.glob("*.yaml")) if self.profiles.is_dir() else []
+
+    def load_profile(self, name: str | None) -> SeriesProfile:
+        """Load a profile by name or path, or pick the only one there is.
+
+        ``name`` of None means the caller did not say. That is answerable when
+        the workspace holds exactly one profile and genuinely ambiguous when it
+        holds several — and guessing there is how a command ends up reporting
+        confidently on the wrong series. Requiring the flag in the
+        single-profile case would be friction protecting against nothing, so
+        the rule keys on ambiguity rather than on the flag being absent.
+        """
+        available = self.available_profiles()
+        if name is None:
+            if len(available) == 1:
+                return self.load_profile(available[0])
+            raise ProfileError(
+                f"--profile is required: this workspace has {len(available)} profiles "
+                f"({', '.join(available) or 'none'}). Name the one you mean."
+                if available else
+                "no profiles in this workspace — see profiles/, or run `bp init`"
+            )
         for candidate in (Path(name), self.profiles / name, self.profiles / f"{name}.yaml"):
             if candidate.is_file():
                 return SeriesProfile.load(candidate)
-        available = sorted(p.stem for p in self.profiles.glob("*.yaml")) if self.profiles.is_dir() else []
         raise ProfileError(f"no profile {name!r}; available: {available or '(none — see profiles/)'}")
 
     def load_policy(self, name: str | None) -> RunPolicy:
@@ -73,9 +94,10 @@ class Workspace:
                 return RunPolicy.load(candidate)
         return RunPolicy.load(name)
 
-    def open_graph(self, profile: SeriesProfile, *, db: str | Path | None = None) -> Graph:
+    def open_graph(self, profile: SeriesProfile, *, db: str | Path | None = None,
+                   create: bool = False) -> Graph:
         path = Path(db) if db else self.db_path(profile.name)
-        g = Graph(path, profile)
+        g = Graph(path, profile, create=create)
         # Channel availability resolved at ingest is stored in meta; restore it
         # so every later command reasons with the same channel dates.
         from .timeline import Span

@@ -83,7 +83,7 @@ def cmd_ingest(args) -> int:
 
     ws = Workspace.find()
     profile = ws.load_profile(args.profile)
-    graph = ws.open_graph(profile, db=args.db)
+    graph = ws.open_graph(profile, db=args.db, create=True)
     report = ingest(args.corpus or ws.corpus, graph, profile, max_scene_words=args.max_scene_words)
     _echo(report.render())
     _echo(f"\ngraph: {graph.path}")
@@ -682,7 +682,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     def common(sp, *, profile=True, run=False):
         if profile:
-            sp.add_argument("--profile", default="example", help="series profile name or path")
+            sp.add_argument("--profile", default=None, help="series profile name or path")
         sp.add_argument("--db", default=None, help="graph database path (default graph/<profile>.sqlite)")
         if run:
             sp.add_argument("--run", default=None, help="run policy name or path")

@@ -119,7 +119,40 @@ def test_cli_init_scaffolds_a_workspace(tmp_path):
 def test_cli_reports_missing_credentials_clearly(tmp_path):
     """A model-backed stage with no key must fail clearly, not degrade into
     something that looks like it worked."""
+    import synthetic
+
     _bp("init", str(tmp_path), cwd=tmp_path)
+    # The graph has to exist for the run to reach the credential check at all —
+    # a missing one is now its own error, deliberately.
+    synthetic.build(tmp_path / "graph" / "example.sqlite")[0].close()
     out = _bp("extract", cwd=tmp_path, env=_env(ANTHROPIC_API_KEY=None))
     assert out.returncode == 3, out.stderr
     assert "ANTHROPIC_API_KEY" in out.stderr
+
+
+def test_cli_refuses_to_invent_a_graph_that_does_not_exist(tmp_path):
+    """The bug this test exists for: Graph() used to create a missing database,
+    so a mistyped --profile analysed a brand-new empty graph and reported a
+    clean bill of health. Every command but init and ingest must refuse, and
+    name the path it looked for."""
+    _bp("init", str(tmp_path), cwd=tmp_path)
+    out = _bp("ground", cwd=tmp_path)
+    assert out.returncode != 0
+    assert "no graph at" in out.stderr
+    assert not (tmp_path / "graph" / "example.sqlite").exists(), "and it must not have made one"
+
+
+def test_cli_requires_a_profile_when_the_workspace_has_several(tmp_path):
+    """Defaulting is only safe when there is nothing to choose between."""
+    import yaml
+
+    import synthetic
+
+    _bp("init", str(tmp_path), cwd=tmp_path)
+    (tmp_path / "profiles" / "second.yaml").write_text(
+        yaml.safe_dump(dict(synthetic.PROFILE_DICT)), encoding="utf-8")
+
+    out = _bp("ground", cwd=tmp_path)
+    assert out.returncode != 0
+    assert "--profile is required" in out.stderr
+    assert "second" in out.stderr and "example" in out.stderr

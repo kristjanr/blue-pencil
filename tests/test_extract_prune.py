@@ -204,7 +204,7 @@ def test_resolve_entity_id_does_not_loop_forever_on_a_cycle():
     from bp.db import Graph
 
     with tempfile.TemporaryDirectory() as tmp:
-        graph = Graph(Path(tmp) / "cycle.sqlite")
+        graph = Graph(Path(tmp) / "cycle.sqlite", create=True)
         graph.conn.execute("INSERT INTO entity_merges (old_id, new_id) VALUES ('a', 'b')")
         graph.conn.execute("INSERT INTO entity_merges (old_id, new_id) VALUES ('b', 'a')")
         graph.commit()

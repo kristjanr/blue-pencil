@@ -29,6 +29,15 @@ class CalendarError(BluePencilError):
     """A date string could not be parsed in the profile's calendar."""
 
 
+class GraphNotFound(BluePencilError):
+    """A command asked for a graph database that does not exist.
+
+    Creating one on demand is worse than failing: an empty graph answers every
+    question plausibly and wrongly, so a mistyped profile reports a clean bill
+    of health instead of an error.
+    """
+
+
 class NoCredentials(BluePencilError):
     """A model-backed stage was invoked with no API key configured."""
 
