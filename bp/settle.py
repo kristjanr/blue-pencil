@@ -42,6 +42,7 @@ circular guess wearing the extractor's own label.
 from __future__ import annotations
 
 import json
+import re
 import statistics
 from dataclasses import dataclass, field
 
@@ -272,6 +273,19 @@ class SettleReport:
         return "\n".join(lines)
 
 
+def _decode_escapes(text: str) -> str:
+    """Turn a literal ``\\u2019`` back into the character it stands for.
+
+    The model quotes faithfully but the escape sometimes survives decoding as
+    six literal characters, and prose is full of curly apostrophes. Left alone
+    this rejected 5 of 6 proposed closes in the pilot as unverifiable — the
+    verification guard manufacturing exactly the fabrication it exists to
+    catch. Nothing else is touched: a quote that is genuinely not in the scene
+    still fails.
+    """
+    return re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), text or "")
+
+
 def _distinctive(text: str) -> set[str]:
     from .grounding import _STOP, _WORD
 
@@ -342,7 +356,7 @@ def settle(
             if c.promise_id not in set(candidates):
                 report.rejected_unknown.append((scene["scene_id"], c.promise_id))
                 continue
-            nq = _norm(c.quote)
+            nq = _norm(_decode_escapes(c.quote))
             if not nq or nq not in scene_norm:
                 report.rejected_quote.append((scene["scene_id"], c.promise_id, c.quote))
                 continue

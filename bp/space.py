@@ -65,6 +65,17 @@ class SpaceModel:
     #: places seen in the distance file, for alias/typo diagnostics
     places: set[str] = field(default_factory=set)
     default_travel_speed: float = 0.0
+    #: Transit shortcuts that come into existence partway through a series — a
+    #: wormhole network, a jump gate. Shaped like an information channel and
+    #: for the same reason: `travel_speed` alone cannot express "and then, in
+    #: book 5, this became possible". Deliberately carries no topology. We do
+    #: not know which places a WormNet connects or when, and a guessed topology
+    #: would be worse than none — it would clear journeys that really are
+    #: impossible, which is the expensive direction. Its only job is to say
+    #: that after this date an over-long journey is something the checker
+    #: cannot demonstrate to be impossible.
+    transit_from: list[tuple[str, str]] = field(default_factory=list)
+    transit_from_day: dict[str, float] = field(default_factory=dict)
     #: canonical place -> (x, y, z) in light-years. A pairwise file needs N^2
     #: rows, and a real series names dozens of places; catalogue coordinates
     #: give every separation from N rows.
@@ -89,6 +100,10 @@ class SpaceModel:
             sm._load_pairs(Path(base or ".") / path)
         if (places_path := spec.get("places")):
             sm._load_places(Path(base or ".") / places_path)
+        for entry in spec.get("channels") or []:
+            if isinstance(entry, dict) and entry.get("name"):
+                sm.transit_from.append((str(entry["name"]),
+                                        str(entry.get("available_from") or "")))
         if (speed := spec.get("travel_speed")) is not None:
             sm.default_travel_speed = parse_speed(speed)
         elif model == "interstellar":
@@ -225,6 +240,20 @@ class SpaceModel:
         if speed_ly_per_day <= 0:
             raise ProfileError("channel speed must be positive")
         return sep / speed_ly_per_day
+
+    def shortcut_at(self, day: float | None) -> str:
+        """The first transit shortcut that exists by this day, if any.
+
+        Names it rather than returning a bool so the finding can say which
+        mechanism it cannot price.
+        """
+        if day is None:
+            return ""
+        for name, _book in self.transit_from:
+            start = self.transit_from_day.get(name)
+            if start is None or day >= start:
+                return name
+        return ""
 
     def travel_days(self, a: str, b: str, speed_ly_per_day: float | None = None) -> float:
         """Days for a body (not a signal) to get from a to b."""

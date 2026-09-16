@@ -243,3 +243,30 @@ def test_the_spend_cap_stops_the_run(world):
     report = settle(graph, profile, _FakeClient([]), model="claude-sonnet-5", max_usd=0.0)
     assert report.stopped and "cap" in report.stopped
     assert report.scenes_read == 0
+
+
+def test_an_escaped_apostrophe_does_not_read_as_a_fabricated_quote(world):
+    """The bug this test exists for: the model quotes faithfully, but the
+    escape sometimes arrives as six literal characters, and prose is full of
+    curly apostrophes. That rejected 5 of 6 proposed closes in the pilot — the
+    verification guard manufacturing the very fabrication it exists to catch."""
+    from bp.settle import settle
+
+    graph, profile = world
+    scenes = _scene_ids(world)
+    _open_promise(graph, "P-1", scenes[0])
+    graph.conn.execute("UPDATE scenes SET text=? WHERE scene_id=?",
+                       ("She said she can’t forget the relay.", scenes[1]))
+    graph.commit()
+
+    escaped = "she can" + chr(92) + "u2019t forget the relay"
+    report = settle(graph, profile, _FakeClient([{"closes": [
+        {"promise_id": "P-1", "quote": escaped, "why": "paid"}]}]),
+        model="claude-sonnet-5", max_usd=5.0)
+    assert len(report.closes) == 1, "an escaped apostrophe is still a real quote"
+    assert not report.rejected_quote
+
+    report = settle(graph, profile, _FakeClient([{"closes": [
+        {"promise_id": "P-1", "quote": "a line that is nowhere in this scene", "why": "x"}]}]),
+        model="claude-sonnet-5", max_usd=5.0)
+    assert report.closes == [], "and a quote that really is absent still fails"
