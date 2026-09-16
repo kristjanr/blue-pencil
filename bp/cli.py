@@ -176,6 +176,9 @@ def cmd_resolve(args) -> int:
             return 1
         report = apply_verdicts(graph, args.verdicts, apply=args.apply)
         _echo(report.render())
+        if report.wrong_graph or report.errors:
+            graph.close()
+            return 1
         if not args.apply:
             _echo("\ndry run — nothing written. Re-run with --apply to merge.")
     graph.close()

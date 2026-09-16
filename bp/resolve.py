@@ -235,17 +235,41 @@ def adjudicate(client, model: str, c: Candidate, graph, *, usage=None) -> Verdic
 class ApplyReport:
     """What applying a verdicts file did, or would do."""
 
+    database: str = ""
+    groups_in_file: int = 0
     groups: int = 0
     absorbed: int = 0
-    skipped: list[str] = field(default_factory=list)
+    already: list[str] = field(default_factory=list)
+    unresolved: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
     planned: list[tuple[str, list[str]]] = field(default_factory=list)
 
+    @property
+    def wrong_graph(self) -> bool:
+        """Every group in the file names records this graph has never held.
+
+        Reported separately from "already applied" because the two look
+        identical from the outside and mean opposite things: one says the work
+        is done, the other says you are pointed at the wrong database.
+        """
+        return self.groups_in_file > 0 and len(self.unresolved) == self.groups_in_file
+
     def render(self) -> str:
-        lines = [f"{self.groups} merge group(s) · {self.absorbed} record(s) absorbed"]
+        lines = [f"database: {self.database}",
+                 f"{self.groups} merge group(s) to apply · {self.absorbed} record(s) absorbed"]
         for keeper, losers in self.planned:
             lines.append(f"  {keeper} <- {', '.join(losers)}")
-        for note in self.skipped:
-            lines.append(f"  skipped: {note}")
+        if self.already:
+            lines.append(f"  already applied: {len(self.already)} group(s)")
+        for note in self.errors:
+            lines.append(f"  ERROR {note}")
+        if self.wrong_graph:
+            lines.append("")
+            lines.append(f"NOTHING in this file exists in {self.database} — "
+                         f"all {self.groups_in_file} groups name records this graph "
+                         f"has never held. This is the wrong database, not a finished job.")
+        elif self.unresolved:
+            lines.append(f"  not in this graph at all: {', '.join(self.unresolved)}")
         return "\n".join(lines)
 
 
@@ -283,26 +307,41 @@ def apply_verdicts(graph, path, *, apply: bool = False) -> ApplyReport:
     """
     from .extract import merge_group
 
-    report = ApplyReport()
+    def exists(eid: str) -> bool:
+        return graph.conn.execute(
+            "SELECT 1 FROM entities WHERE entity_id=?", (eid,)).fetchone() is not None
+
+    report = ApplyReport(database=str(graph.path))
     for keeper, losers in load_verdicts(path):
-        live = [
-            lid for lid in losers
-            if graph.conn.execute(
-                "SELECT 1 FROM entities WHERE entity_id=?", (lid,)).fetchone()
-        ]
+        report.groups_in_file += 1
+        keeper_id = keeper if exists(keeper) else graph.resolve_entity_id(keeper)
+        keeper_live = exists(keeper_id)
+        live = [lid for lid in losers if exists(lid)]
+
+        # Order matters here, and getting it wrong is how this reported a
+        # finished job to someone who had opened the wrong database: absent
+        # losers were read as "already absorbed" before the keeper was ever
+        # checked, so a graph containing none of these records looked
+        # identical to one where every merge had been applied.
+        if not keeper_live and not live:
+            report.unresolved.append(keeper)
+            continue
+        if not keeper_live:
+            report.errors.append(f"{keeper}: keeper is not an entity in this graph")
+            continue
         if not live:
-            report.skipped.append(f"{keeper}: every record already absorbed")
+            # Absence alone is not proof of absorption — entity_merges is.
+            stranded = [lid for lid in losers if graph.resolve_entity_id(lid) != keeper_id]
+            if stranded:
+                report.errors.append(
+                    f"{keeper}: {', '.join(stranded)} absent but not recorded as merged here")
+            else:
+                report.already.append(keeper)
             continue
-        if graph.conn.execute(
-                "SELECT 1 FROM entities WHERE entity_id=?", (keeper,)).fetchone() is None:
-            report.skipped.append(f"{keeper}: keeper is not an entity in this graph")
-            continue
+
         report.groups += 1
-        report.planned.append((keeper, live))
-        if apply:
-            report.absorbed += merge_group(graph, keeper, live)
-        else:
-            report.absorbed += len(live)
+        report.planned.append((keeper_id, live))
+        report.absorbed += merge_group(graph, keeper_id, live) if apply else len(live)
     if apply:
         graph.conn.commit()
     return report

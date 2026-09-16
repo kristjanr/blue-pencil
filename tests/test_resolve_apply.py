@@ -127,4 +127,53 @@ def test_apply_verdicts_skips_a_group_already_applied(world, tmp_path):
 
     again = apply_verdicts(graph, f, apply=True)
     assert again.groups == 0 and again.absorbed == 0
-    assert any("already absorbed" in s for s in again.skipped)
+    assert again.already == ["keeper"]
+
+
+def test_a_wrong_database_is_not_reported_as_already_applied(world, tmp_path):
+    """The bug this test exists for: applying a verdicts file against a graph
+    that has never held any of its records printed "every record already
+    absorbed" for all 25 groups — indistinguishable from a finished job, and
+    the reviewer nearly recorded the merge as done and went on to measure a
+    graph that hadn't changed. Absent losers were read as absorbed before the
+    keeper was ever checked."""
+    graph, _ = world
+    f = tmp_path / "v.yaml"
+    f.write_text(
+        "merge:\n"
+        "  - {keep: nowhere_keeper, absorb: [nowhere_a, nowhere_b], why: same}\n"
+        "  - {keep: also_missing, absorb: [nowhere_c], why: same}\n",
+        encoding="utf-8")
+
+    report = apply_verdicts(graph, f, apply=False)
+    assert report.wrong_graph, "a graph holding none of these records is the wrong graph"
+    assert report.already == [], "nothing here was ever absorbed"
+    assert report.absorbed == 0
+    assert str(graph.path) in report.render()
+    assert "wrong database" in report.render()
+
+
+def test_absence_alone_is_not_proof_of_absorption(world, tmp_path):
+    """A loser that is simply gone, with no entity_merges row pointing at this
+    keeper, is unexplained — not silently 'already done'."""
+    graph, _ = world
+    graph.write_entity(Entity(entity_id="keeper", name="Keeper", kind="character", citations=CIT))
+    graph.commit()
+    f = tmp_path / "v.yaml"
+    f.write_text("merge:\n  - {keep: keeper, absorb: [vanished], why: same}\n", encoding="utf-8")
+
+    report = apply_verdicts(graph, f, apply=False)
+    assert report.already == []
+    assert any("not recorded as merged here" in e for e in report.errors)
+
+
+def test_a_genuinely_applied_group_is_reported_as_already_applied(world, tmp_path):
+    graph, _ = world
+    _two_records(graph)
+    f = tmp_path / "v.yaml"
+    f.write_text("merge:\n  - {keep: keeper, absorb: [loser], why: same}\n", encoding="utf-8")
+    apply_verdicts(graph, f, apply=True)
+
+    again = apply_verdicts(graph, f, apply=False)
+    assert again.already == ["keeper"], "entity_merges proves this one really was absorbed"
+    assert not again.wrong_graph and not again.errors
