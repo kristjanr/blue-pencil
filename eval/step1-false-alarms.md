@@ -106,3 +106,73 @@ what keeps failing is the step where it decides what silence means.
 2. Kind filter on knowers and on dead-and-acting.
 3. Decide whether wormholes belong in the profile's channels.
 4. Re-run against the better transcript when it exists, for the number of record.
+
+---
+
+# Second run — 2026-09-16, after the epistemic and kind fixes
+
+```
+4 hard · 378 soft · 694 notes        target: ≤ 2 hard
+67 of 71 chapters clean              (was 26 of 71)
+
+epistemic 161 → 0
+objects     4 → 1
+geography   3 → 3
+```
+
+**168 → 4.** The epistemic fix removed 161; the `kind=faction` fix removed the
+three "the Pav is recorded dead but acts" findings.
+
+A note on how that fix landed, because the first version was mine and it was
+wrong. I proposed downgrading the no-path branch to a note unconditionally.
+`blue-pencil-3c` measured it against the planted-error fixture first and found it
+cost two real catches — in a *built* world, where every observer and report is
+recorded on purpose, a missing path really is missing. The distinction isn't the
+branch, it's whether the corpus records propagation exhaustively. That is now
+declared (`epistemic: {paths_are_complete: …}`, **default off**) rather than
+assumed. Off is the assumption that fails safe.
+
+My own recall gate had not noticed the regression, because it matched on check
+name and line window and ignored severity — a finding could decay from hard to
+note and still count as caught. Fixed, and measured: with completeness off,
+acted-on recall is 18/20 and the threshold is ≥ 18, so **it would still have
+passed**. The threshold has exactly as much slack as the regression costs. So the
+gate now also asserts that a path-complete world produces no note-only catches.
+
+## The four that remain — both are the same rule again
+
+**3 × geography.** The data and the arithmetic are both correct: Ragnarök resolves
+to Epsilon Eridani, New Pav to Delta Pavonis, ~22 ly apart, and at the profile's
+0.5c that is ~16,400 days. The gap is that **book 5 introduces wormholes** and the
+space model has no concept of a transit shortcut — only `information` has channels
+with availability dates; `space` has a single speed.
+
+The fix is *not* to invent a wormhole topology we don't have. It is the standing
+rule: the checker cannot demonstrate this journey is impossible, because a
+mechanism exists that it does not model. Once a transit channel is available, an
+over-long journey is a **note**, not a hard finding, unless the endpoints can be
+shown to be unconnected.
+
+**1 × objects.** Alan, recorded dead, "acts in this chapter". The chapter says:
+
+> *I hadn't thought of Carl, Karen, and Alan in, literally, centuries. … Alan
+> **had been** a dedicated sailplane pilot.*
+
+Past-tense reminiscence about a dead friend, read as present action.
+`_acts_on_page()` has a careful docstring about not treating everyone named as an
+actor; it doesn't handle a dead man being remembered. Same mention-vs-participation
+family as `cast_json`, the 144 contradictions, and the epistemic knower list.
+
+**With both fixed, step 1 is 0.**
+
+## What step 1 was actually worth
+
+The checkers went from 168 false alarms to 4 in one working session, and every
+reduction came from the same insight rather than from tuning: *a check may only
+raise `hard` when it has positively computed a contradiction.* Six instances of
+that error have now been found. None of them was in the reasoning; all of them
+were in what the code concluded from silence.
+
+The number to quote once the better transcript exists is the one from a re-run,
+not this. But the *shape* of the result won't change: the checkers are sound and
+their severity discipline was not.
