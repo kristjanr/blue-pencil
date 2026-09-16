@@ -126,8 +126,15 @@ def _unj(value: str | None) -> list[str]:
     return [str(x) for x in out if x] if isinstance(out, list) else []
 
 
-def candidate_index(graph: Graph, profile: SeriesProfile | None = None) -> tuple[dict[str, list[str]], IndexReport]:
+def candidate_index(graph: Graph, profile: SeriesProfile | None = None,
+                    *, exclude: set[str] | None = None) -> tuple[dict[str, list[str]], IndexReport]:
     """For each scene, the open promises that scene could be paying off.
+
+    ``exclude`` drops promises from every listing — what a settling run already
+    closed. Passing the closes from book 1 back in is how the saving from
+    settling in reading order gets measured before it is paid for: a promise
+    closed in book 1 stops appearing in every later scene, and the listing is
+    96% of what a run costs.
 
     A promise is a candidate for a scene when the scene comes after the promise
     was planted and somebody the promise is owed by is in it. Both halves fall
@@ -183,8 +190,11 @@ def candidate_index(graph: Graph, profile: SeriesProfile | None = None) -> tuple
     report = IndexReport(scenes=len(scenes))
     index: dict[str, list[str]] = {s["scene_id"]: [] for s in scenes}
 
+    skip = exclude or set()
     for p in graph.conn.execute(
             "SELECT promise_id, planted_in, owed_by FROM promises WHERE status='open'"):
+        if p["promise_id"] in skip:
+            continue
         report.promises += 1
 
         planted = [s for s in _unj(p["planted_in"]) if s in ord_of]
@@ -212,7 +222,8 @@ def candidate_index(graph: Graph, profile: SeriesProfile | None = None) -> tuple
     # What Stage 2 would actually send: each scene's text once, plus a line per
     # candidate promise.
     summaries = {r["promise_id"]: r["summary"] or "" for r in graph.conn.execute(
-        "SELECT promise_id, summary FROM promises WHERE status='open'")}
+        "SELECT promise_id, summary FROM promises WHERE status='open'")
+        if r["promise_id"] not in skip}
     for s in graph.conn.execute("SELECT scene_id, book_id, tokens FROM scenes"):
         ids = index.get(s["scene_id"], [])
         report.per_scene.append(len(ids))

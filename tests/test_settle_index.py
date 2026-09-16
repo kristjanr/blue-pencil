@@ -307,3 +307,23 @@ def test_a_dry_run_leaves_no_trail(world):
         {"promise_id": "P-1", "quote": line, "why": "paid"}]}]),
         model="claude-sonnet-5", max_usd=5.0, run_id="dry-under-test")
     assert graph.changes_in_run("dry-under-test") == []
+
+
+def test_excluding_closed_promises_shrinks_every_later_listing(world):
+    """How the saving from settling in reading order gets measured before it is
+    paid for. A promise closed early stops appearing in every later scene, and
+    the listing is 96% of what a run costs."""
+    graph, profile = world
+    scenes = _scene_ids(world)
+    for i in range(3):
+        _open_promise(graph, f"P-{i}", scenes[0])
+    graph.commit()
+
+    full, rep_full = candidate_index(graph, profile)
+    part, rep_part = candidate_index(graph, profile, exclude={"P-0", "P-1"})
+
+    assert rep_part.promises == rep_full.promises - 2
+    assert rep_part.pairs < rep_full.pairs
+    assert rep_part.prompt_tokens < rep_full.prompt_tokens
+    assert all("P-0" not in pids for pids in part.values())
+    assert any("P-2" in pids for pids in part.values()), "the rest are untouched"
