@@ -226,3 +226,61 @@ while their real value was `explicit`/1.0.
 **Lesson worth keeping: a mutation that overwrites a value should record what it
 overwrote.** The only reason this was recoverable is that `backup.sh` had run before
 the demotion. That is luck standing in for design.
+
+---
+
+# Corpus repair: the drop-cap glue (2026-09-16)
+
+**24 scenes in book 5** opened with the narrator's "I" glued to the next word —
+`Iwas reviewing…`, `Istood at the edge…`. Repaired in place, recorded in
+`record_changes` under run `dropcap-d1f5d5a5`.
+
+## It is not an ingest bug
+
+The EPUB itself is missing the space:
+
+```html
+<p class="class_s3j"><span class="class_s2y1">I</span>was reviewing the most…
+```
+
+Ingest concatenated faithfully. The drop cap sits in its own span and the
+following text node begins `was`. Across book 5 the same markup appears as
+`I|was` ×10, `W|e`, `T|he`, `I|t`, `B|ridget` — **identical markup, and gluing is
+correct in every case except where the drop-cap letter is a word on its own.**
+"T" + "he" is "The". "I" + "was" is not "Iwas". Only `I` and `A` can be damaged,
+because they are the only single-letter English words.
+
+## The first attempt was wrong, and the trail is why it cost nothing
+
+I first tested only whether the *glued* token appears elsewhere in the corpus. It
+does not — but neither does any proper noun book 5 introduces. That rule split
+**Alexander → "A lexander" 87 times**, along with Atlantis, Alcubierre, Asimov and
+Indiana, across 71 scenes.
+
+`record_changes` had gone in that morning, at my own request, for exactly this
+class of accident. Reverting was a `SELECT old_value` and an `UPDATE`. Verified
+afterwards that `A lexander` was gone and that the original `Iwas` had come back —
+restoring a defect being the proof that the restore was complete rather than
+approximate.
+
+Worth stating plainly: **the trail earned its keep within an hour of existing, on
+its author's own mistake.**
+
+## The rule that works — three conditions, all required
+
+1. **Position.** Only a scene's opening word. Drop caps occur nowhere else, and
+   this constraint alone saves `Ian McKellen` in book 5.37.1, which every lexical
+   test flags and which is perfectly correct.
+2. **Letter.** Only `I` or `A`.
+3. **Lexicon, both ways.** The *tail* must be a word the series uses, and the
+   *glued form* must be one it never uses. Testing only the second was the whole
+   error: a new book's new names are, by definition, absent from the old books.
+
+The corpus is its own dictionary, and the separation is total — `was` appears
+5,077 times in books 1–4 and `iwas` zero. No external word list, which matters for
+a series whose vocabulary is half invented.
+
+One scene was missed by the sweep and fixed by hand: book 5.08.1's place line,
+*"En route to Omicron2 Eridani"*, is long enough to look like prose, so the
+opening-paragraph finder stopped on the header. A reminder that "skip the header"
+is itself a heuristic.
