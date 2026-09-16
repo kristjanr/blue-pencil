@@ -287,6 +287,13 @@ CREATE INDEX IF NOT EXISTS idx_editor_notes_book ON editor_notes(book, chapter);
 -- because a backup happened to predate it -- luck standing in for design, and
 -- luck that will not hold the next time a checker is corrected. A restore
 -- should be a join, not an archaeology exercise.
+--
+-- It proved that within an hour of existing, on a mistake nobody predicted: a
+-- corpus repair whose rule was half right split `Alexander` into `A lexander`
+-- 87 times across 71 scenes, already committed. The revert was SELECT
+-- old_value and an UPDATE -- thirty seconds, no backup, no re-ingest -- and
+-- the proof it was complete rather than approximate was that the *original*
+-- defect came back.
 CREATE TABLE IF NOT EXISTS record_changes (
     change_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      TEXT DEFAULT '',

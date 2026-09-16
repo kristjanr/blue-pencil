@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -89,6 +90,7 @@ class IngestReport:
     povs: dict[str, int] = field(default_factory=dict)
     undated: int = 0
     unplaced: int = 0
+    dropcaps_split: int = 0
     warnings: list[str] = field(default_factory=list)
 
     def render(self) -> str:
@@ -514,8 +516,72 @@ def ingest(
                 f"but no book with that id was dated during ingestion"
             )
 
+    report.dropcaps_split = repair_dropcaps(graph)
+
     graph.commit()
     return report
+
+
+#: Only `I` and `A` are words in their own right, so they are the only
+#: drop-cap letters that can be damaged by gluing.
+_DROPCAP = re.compile(r"^([IA])([a-z]{2,})\b")
+
+
+def repair_dropcaps(graph: Graph, *, run_id: str = "") -> int:
+    """Put back the space an EPUB drop cap never had.
+
+    The markup is `<span class="dropcap">I</span>was reviewing…` and ingest
+    concatenates it faithfully. Gluing is *correct* almost every time —
+    "T"+"he" is "The", "B"+"ridget" is "Bridget" — and wrong only when the
+    drop-cap letter is a word by itself, which in English is only I and A.
+
+    Three conditions, all required, and the third is the one that is easy to
+    get half right. A first attempt tested only that the glued form is absent
+    from the corpus; that is true of every proper noun a later book introduces,
+    so it split `Alexander` into `A lexander` 87 times. The tail must *also* be
+    a word the series actually uses. The corpus is its own dictionary here,
+    which matters for a series whose vocabulary is half invented: `was` appears
+    5,077 times in books 1-4 and `iwas` never.
+
+    Idempotent, and a no-op on a corpus whose narrator does not open scenes
+    with "I".
+    """
+    # Build the lexicon from everywhere EXCEPT the scene-opening word. The
+    # damaged form is present in the corpus precisely because it is damaged, so
+    # counting it as evidence that the series uses that word makes the rule
+    # argue itself out of every repair it should make.
+    vocab: dict[str, int] = {}
+    rows = [dict(r) for r in graph.conn.execute("SELECT scene_id, text FROM scenes")]
+    for r in rows:
+        body = r["text"].lstrip()
+        opener = _DROPCAP.match(body)
+        if opener:
+            body = body[len(opener.group(0)):]
+        for w in re.findall(r"[A-Za-z]+", body):
+            low = w.lower()
+            vocab[low] = vocab.get(low, 0) + 1
+
+    run_id = run_id or f"dropcap-{uuid.uuid4().hex[:8]}"
+    fixed = 0
+    for r in rows:
+        text = r["text"]
+        stripped = text.lstrip()
+        m = _DROPCAP.match(stripped)          # position: the scene's opening word only
+        if not m:
+            continue
+        glued, letter, tail = m.group(0), m.group(1), m.group(2)
+        if vocab.get(glued.lower(), 0) or not vocab.get(tail.lower(), 0):
+            continue                          # lexicon, both ways
+        lead = len(text) - len(stripped)
+        new = text[:lead] + f"{letter} {tail}" + stripped[len(glued):]
+        graph.record_change(table="scenes", record_id=r["scene_id"], field="text",
+                            old=glued, new=f"{letter} {tail}", run_id=run_id,
+                            reason="drop-cap space restored")
+        graph.conn.execute("UPDATE scenes SET text=? WHERE scene_id=?", (new, r["scene_id"]))
+        fixed += 1
+    if fixed:
+        graph.conn.commit()
+    return fixed
 
 
 def _index_chunks(graph: Graph, scene_id: str, text: str, *, target: int = 550) -> None:

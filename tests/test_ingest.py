@@ -62,3 +62,73 @@ def test_name_harvest_skips_sentence_openers():
     names = harvest_names([text], min_count=3)
     assert "Ana" in names and "Boro" in names
     assert "The" not in names and "Then" not in names and "When" not in names
+
+
+def _scene_with(graph, scene_id, text, ord_):
+    from bp.db import SceneRow
+    graph.add_scene(SceneRow(scene_id=scene_id, book_id="b", chapter=1, scene=1, pov="",
+                             date_text="", day_lo=None, day_hi=None, place="", cast=[],
+                             text=text, words=len(text.split()), tokens=len(text.split()),
+                             ord=ord_))
+
+
+def test_dropcap_repair_splits_only_a_glued_word(tmp_path):
+    """The EPUB writes `<span class=dropcap>I</span>was`, and ingest
+    concatenates it faithfully. Gluing is correct almost every time — "T"+"he"
+    is "The" — and wrong only when the drop-cap letter is a word by itself."""
+    from bp.db import Graph
+    from bp.ingest import repair_dropcaps
+
+    g = Graph(tmp_path / "d.sqlite", create=True)
+    _scene_with(g, "s1", "Iwas reviewing the most recent scans again.", 1)
+    _scene_with(g, "s2", "The relay was quiet. He was reviewing scans.", 2)
+    g.commit()
+
+    assert repair_dropcaps(g) == 1
+    assert g.scene("s1").text.startswith("I was reviewing")
+    assert g.scene("s2").text.startswith("The relay")
+
+
+def test_dropcap_repair_does_not_split_a_new_proper_noun(tmp_path):
+    """The bug this test exists for: a rule that checks only "is the glued form
+    absent from the corpus" is true of every proper noun a later book
+    introduces. It split Alexander into "A lexander" 87 times. The tail must
+    ALSO be a word the series actually uses."""
+    from bp.db import Graph
+    from bp.ingest import repair_dropcaps
+
+    g = Graph(tmp_path / "d.sqlite", create=True)
+    _scene_with(g, "s1", "Alexander raised his hand for silence.", 1)
+    _scene_with(g, "s2", "Atlantis was gone, and Asimov with it.", 2)
+    g.commit()
+
+    assert repair_dropcaps(g) == 0, "'lexander' is not a word this corpus uses"
+    assert g.scene("s1").text.startswith("Alexander")
+    assert g.scene("s2").text.startswith("Atlantis")
+
+
+def test_dropcap_repair_only_touches_the_opening_word(tmp_path):
+    """`Ian McKellen` mid-scene is correct and every lexical test flags it."""
+    from bp.db import Graph
+    from bp.ingest import repair_dropcaps
+
+    g = Graph(tmp_path / "d.sqlite", create=True)
+    _scene_with(g, "s1", "She said an actor. Ian was his name, an old one.", 1)
+    g.commit()
+
+    assert repair_dropcaps(g) == 0
+    assert "Ian was" in g.scene("s1").text
+
+
+def test_dropcap_repair_is_idempotent_and_leaves_a_trail(tmp_path):
+    from bp.db import Graph
+    from bp.ingest import repair_dropcaps
+
+    g = Graph(tmp_path / "d.sqlite", create=True)
+    _scene_with(g, "s1", "Iwas here. He was there too.", 1)
+    g.commit()
+
+    assert repair_dropcaps(g, run_id="r1") == 1
+    assert repair_dropcaps(g, run_id="r2") == 0, "a second pass must be a no-op"
+    trail = g.changes_in_run("r1")
+    assert trail and trail[0]["old_value"] == "Iwas" and trail[0]["new_value"] == "I was"
