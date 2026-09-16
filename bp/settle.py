@@ -55,6 +55,15 @@ from .profile import SeriesProfile
 from .textstats import estimate_tokens
 
 
+#: `estimate_tokens` is a words-to-tokens approximation and it runs light on
+#: this shape of prompt — a long list of short, id-heavy lines. Measured
+#: against the pilot it under-reported by about 2.3x once output tokens were
+#: counted too. A spend cap checked against an estimate that optimistic is not
+#: a cap, and a report quoting the raw figure beside a cap that corrects it
+#: tells two stories. Re-measure this if the prompt shape changes.
+_ESTIMATE_SLACK = 2.3
+
+
 @dataclass
 class IndexReport:
     """The shape of the work Stage 2 would have to do."""
@@ -66,9 +75,22 @@ class IndexReport:
     unowned: int = 0
     per_scene: list[int] = field(default_factory=list)
     prompt_tokens: int = 0
+    #: book -> (scenes, candidate pairs, prompt tokens). Promises accumulate as
+    #: a series runs, so the last book's scenes carry several times the
+    #: candidates of the first's. A full-run cost projected by multiplying book
+    #: one is wrong by a large factor, in the direction that gets a budget
+    #: approved and then overrun.
+    by_book: dict[str, tuple[int, int, int]] = field(default_factory=dict)
 
     def cost_usd(self, rate_in: float, *, batch: bool = True) -> float:
-        usd = self.prompt_tokens / 1_000_000 * rate_in
+        """What a pass would actually cost, not what the token estimate says.
+
+        Carries the same measured correction the spend cap uses. Reporting the
+        raw estimate here while the cap applied the factor gave two different
+        figures for one number out of one tool — the kind of discrepancy that
+        gets a budget approved against the optimistic one.
+        """
+        usd = self.prompt_tokens / 1_000_000 * rate_in * _ESTIMATE_SLACK
         return usd * 0.5 if batch else usd
 
     def render(self) -> str:
@@ -81,10 +103,18 @@ class IndexReport:
             f"promises with no resolvable plant (every scene is 'after'): {self.unanchored:,}",
             f"promises owed to nobody resolvable (over-included, never dropped): {self.unowned:,}",
             "",
-            f"one pass = {self.scenes:,} calls · {self.prompt_tokens:,} input tokens",
+            f"one pass = {self.scenes:,} calls · {self.prompt_tokens:,} estimated input tokens",
+            f"cost below carries the measured {_ESTIMATE_SLACK}x correction "
+            f"(the raw estimate ran that much light against the pilot):",
         ]
         for model, rate in (("claude-haiku-4-5", 1.0), ("claude-sonnet-5", 2.0), ("claude-opus-5", 5.0)):
             lines.append(f"  {model:20} ${self.cost_usd(rate):>7,.2f} batched")
+        if self.by_book:
+            lines += ["", "per book (sonnet, batched) — promises accumulate, so these are not equal:"]
+            for book, (n, pairs, tokens) in sorted(self.by_book.items()):
+                per = pairs / n if n else 0
+                lines.append(f"  {book:12} {n:4} scenes · {per:6.0f} candidates/scene · "
+                             f"${tokens / 1e6 * 2.0 * _ESTIMATE_SLACK * 0.5:>6,.2f}")
         return "\n".join(lines)
 
 
@@ -183,12 +213,15 @@ def candidate_index(graph: Graph, profile: SeriesProfile | None = None) -> tuple
     # candidate promise.
     summaries = {r["promise_id"]: r["summary"] or "" for r in graph.conn.execute(
         "SELECT promise_id, summary FROM promises WHERE status='open'")}
-    for s in graph.conn.execute("SELECT scene_id, tokens FROM scenes"):
+    for s in graph.conn.execute("SELECT scene_id, book_id, tokens FROM scenes"):
         ids = index.get(s["scene_id"], [])
         report.per_scene.append(len(ids))
         report.pairs += len(ids)
         listing = sum(estimate_tokens(f"{pid}: {summaries.get(pid, '')}") for pid in ids)
-        report.prompt_tokens += int(s["tokens"] or 0) + listing
+        cost = int(s["tokens"] or 0) + listing
+        report.prompt_tokens += cost
+        n, pairs, tokens = report.by_book.get(s["book_id"], (0, 0, 0))
+        report.by_book[s["book_id"]] = (n + 1, pairs + len(ids), tokens + cost)
 
     return index, report
 
@@ -420,15 +453,6 @@ def settle(
     if apply:
         graph.conn.commit()
     return report
-
-
-#: `estimate_tokens` is a words-to-tokens approximation and it runs light on
-#: this shape of prompt — a long list of short, id-heavy lines. Measured
-#: against the pilot it under-reported by about 2.3x once output tokens were
-#: counted too. A spend cap checked against an estimate that optimistic is not
-#: a cap, so the estimate carries the measured factor and the cap is applied to
-#: the honest number. Re-measure this if the prompt shape changes.
-_ESTIMATE_SLACK = 2.3
 
 
 def settle_batch(
