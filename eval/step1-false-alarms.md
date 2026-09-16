@@ -176,3 +176,53 @@ were in what the code concluded from silence.
 The number to quote once the better transcript exists is the one from a re-run,
 not this. But the *shape* of the result won't change: the checkers are sound and
 their severity discipline was not.
+
+---
+
+# Third run — 2026-09-16, with the wormhole channel
+
+```
+0 hard · 378 soft · 697 notes        target: ≤ 2 hard
+71 of 71 chapters clean
+```
+
+**Step 1 passes.** 168 → 4 → **0**, in one working session.
+
+The last three came from adding `space.channels: [{name: wormhole, available_from:
+"book 5"}]` to the profile — deliberately with **no topology**. We do not know which
+systems the WormNet joins or when it reached them, and a guessed map would be worse
+than none: it would clear journeys that really are impossible. Naming the mechanism
+only downgrades a finding to a note; it never clears anything, and before book 5 an
+over-long journey is still a hard failure.
+
+## What the run cost the checkers in credibility, and what it bought
+
+Every one of the 168 was a checker fault, which is what step 1 is for. But they were
+not 168 faults — they were **three**, and each was the same mistake: asserting a
+contradiction the checker had not demonstrated.
+
+That number should be re-taken against the better transcript when it exists. The
+shape will not change; none of the three causes had anything to do with
+transcription quality.
+
+## Correction to a figure quoted throughout this project
+
+The "391 citations whose quote appears nowhere" is **235**. 156 of the 391 verify
+under a punctuation-insensitive comparison — the model had dropped quotation marks
+around an interjection, or placed a curly quote at the other end of the line. One
+was the *corpus* being wrong, not the quote: book 5.14.1 stores `Iwas in my VR lab`,
+a space lost to drop-cap handling at ingest, which affects 11 book-5 scenes and
+reaches everything downstream.
+
+That correction has a consequence I had to undo. `bp ground --demote` capped 378
+records at `inferred`/0.5 on the old number, and `demote_unproven` never recorded
+what it overwrote. Restored from the pre-demotion snapshot
+(`bobiverse-20260915-2025`, taken at commit `cbdadc6`): **142 records whose original
+`claim_type` and `confidence` were put back**, being the ones that pass the
+corrected check outright — 109 events, 16 promises, 8 threads, 7 entities, 2
+objects. 234 remain correctly demoted. Several had been sitting at `inferred`/0.5
+while their real value was `explicit`/1.0.
+
+**Lesson worth keeping: a mutation that overwrites a value should record what it
+overwrote.** The only reason this was recoverable is that `backup.sh` had run before
+the demotion. That is luck standing in for design.
