@@ -355,9 +355,16 @@ class Graph:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self._migrate()
-        self.set_meta("schema_version", str(SCHEMA_VERSION))
+        # Stamp only when the stamp would change. Writing it unconditionally
+        # took a write lock just to open the graph, so a read-only command —
+        # `bp ground`, `bp graph stats`, the ledger index — could not run at all
+        # while an extraction held the database, which is exactly when you most
+        # want to look at it.
+        if self.get_meta("schema_version") != str(SCHEMA_VERSION):
+            self.set_meta("schema_version", str(SCHEMA_VERSION))
         if profile is not None and profile.source:
-            self.set_meta("profile", str(profile.source))
+            if self.get_meta("profile") != str(profile.source):
+                self.set_meta("profile", str(profile.source))
 
     # ------------------------------------------------------------------ basics
     def close(self) -> None:

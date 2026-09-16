@@ -185,6 +185,23 @@ def cmd_resolve(args) -> int:
     return 0
 
 
+def cmd_settle(args) -> int:
+    from .settle import candidate_index
+
+    ws = Workspace.find()
+    profile = ws.load_profile(args.profile)
+    graph = ws.open_graph(profile, db=args.db)
+    index, report = candidate_index(graph, profile)
+    _echo(f"database: {graph.path}")
+    _echo(report.render())
+    if args.show:
+        _echo("")
+        for sid, pids in list(index.items())[: args.show]:
+            _echo(f"  {sid}: {len(pids)} candidate promise(s)")
+    graph.close()
+    return 0
+
+
 def cmd_cast(args) -> int:
     from .extract import rebuild_scene_cast
 
@@ -730,6 +747,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--limit", type=int, default=25)
     sp.add_argument("--model", default=None)
     sp.set_defaults(func=cmd_resolve)
+
+    sp = sub.add_parser("settle", help="index which scenes could pay off which promises (no model, no cost)")
+    common(sp)
+    sp.add_argument("--show", type=int, default=0, help="list this many scenes' candidate counts")
+    sp.set_defaults(func=cmd_settle)
 
     sp = sub.add_parser("cast", help="rebuild scene cast from cited events (no model, no cost)")
     common(sp)

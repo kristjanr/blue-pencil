@@ -91,6 +91,7 @@ class ExtractReport:
     contradictions: int = 0
     rejected_uncited: int = 0
     citations_repinned: int = 0
+    planted_repinned: int = 0
     fields_dropped: int = 0
     records_salvaged: int = 0
     unwrapped_json: int = 0
@@ -110,6 +111,7 @@ class ExtractReport:
             f"duplicate entity records merged: {self.entities_merged}",
             f"records rejected for having no citation: {self.rejected_uncited}",
             f"citations re-pinned to the scene they came from: {self.citations_repinned}",
+            f"promise plants re-pinned: {self.planted_repinned}",
             f"salvaged: {self.fields_dropped} unknown fields dropped, "
             f"{self.records_salvaged} records with an out-of-vocabulary value, "
             f"{self.unwrapped_json} string-wrapped arrays parsed",
@@ -208,6 +210,15 @@ def _write_records(graph: Graph, scene_id: str, pass_name: str, payload: Any, re
             report.objects += 1
         for p in payload.promises:
             cited(p)
+            # `planted_in` is a scene reference too, and it was never pinned the
+            # way citations are — so it drifts the same way, to `book5.15.3` or
+            # `B2.66.1`. A promise whose plant points at no real scene has lost
+            # its place in the timeline, which is the one thing the ledger needs
+            # it for: without it there is no "after here" to look for a payoff in.
+            pinned = [s if s == scene_id else scene_id for s in p.planted_in]
+            if pinned != list(p.planted_in):
+                report.planted_repinned += 1
+            p.planted_in = pinned or [scene_id]
             graph.write_promise(p)
             report.promises += 1
         for t in payload.threads:
