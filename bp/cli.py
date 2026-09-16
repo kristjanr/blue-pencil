@@ -191,13 +191,36 @@ def cmd_settle(args) -> int:
     ws = Workspace.find()
     profile = ws.load_profile(args.profile)
     graph = ws.open_graph(profile, db=args.db)
-    index, report = candidate_index(graph, profile)
     _echo(f"database: {graph.path}")
+    if args.what == "index":
+        index, report = candidate_index(graph, profile)
+        _echo(report.render())
+        if args.show:
+            _echo("")
+            for sid, pids in list(index.items())[: args.show]:
+                _echo(f"  {sid}: {len(pids)} candidate promise(s)")
+        graph.close()
+        return 0
+
+    from .settle import settle
+
+    model = args.model or ws.load_policy(args.run).model_for("judge")
+    scene_ids = None
+    if args.sample:
+        rows = [r["scene_id"] for r in graph.conn.execute(
+            "SELECT scene_id FROM scenes ORDER BY ord")]
+        step = max(1, len(rows) // args.sample)
+        scene_ids = rows[::step][: args.sample]
+    _echo(f"model {model} · cap ${args.max_usd:,.2f} · "
+          f"{len(scene_ids) if scene_ids else 'all'} scenes"
+          + ("" if args.apply else " · DRY RUN"))
+    report = settle(graph, profile, _client_or_none(True), model=model,
+                    scene_ids=scene_ids, max_usd=args.max_usd,
+                    apply=args.apply, progress=_echo)
+    _echo("")
     _echo(report.render())
-    if args.show:
-        _echo("")
-        for sid, pids in list(index.items())[: args.show]:
-            _echo(f"  {sid}: {len(pids)} candidate promise(s)")
+    if not args.apply:
+        _echo("\ndry run — nothing written. Re-run with --apply to close these.")
     graph.close()
     return 0
 
@@ -748,9 +771,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--model", default=None)
     sp.set_defaults(func=cmd_resolve)
 
-    sp = sub.add_parser("settle", help="index which scenes could pay off which promises (no model, no cost)")
-    common(sp)
+    sp = sub.add_parser("settle", help="settle the promise ledger: index (free), or run the verdicts")
+    common(sp, run=True)
+    sp.add_argument("what", choices=["index", "run"], nargs="?", default="index")
     sp.add_argument("--show", type=int, default=0, help="list this many scenes' candidate counts")
+    sp.add_argument("--sample", type=int, default=0, help="run on N scenes spread across the corpus")
+    sp.add_argument("--model", default=None)
+    sp.add_argument("--max-usd", type=float, default=1.0, dest="max_usd")
+    sp.add_argument("--apply", action="store_true", help="write the closes; default is a dry run")
     sp.set_defaults(func=cmd_settle)
 
     sp = sub.add_parser("cast", help="rebuild scene cast from cited events (no model, no cost)")

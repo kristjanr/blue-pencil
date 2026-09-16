@@ -115,3 +115,131 @@ def test_the_estimate_counts_each_scene_once(world):
     assert report.prompt_tokens >= scene_tokens
     assert report.prompt_tokens < scene_tokens * report.scenes, \
         "per-pair would multiply the scene text by the candidate count"
+
+
+# ------------------------------------------------------------------ stage two
+class _FakeMessages:
+    def __init__(self, closes_by_call):
+        self._script = list(closes_by_call)
+        self.calls = []
+
+    def create(self, **kw):
+        from types import SimpleNamespace
+        self.calls.append(kw)
+        payload = self._script.pop(0) if self._script else {"closes": []}
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="tool_use", input=payload)],
+            stop_reason="tool_use",
+            usage=SimpleNamespace(input_tokens=1000, output_tokens=50,
+                                  cache_read_input_tokens=0, cache_creation_input_tokens=0),
+        )
+
+
+class _FakeClient:
+    def __init__(self, closes_by_call):
+        self.messages = _FakeMessages(closes_by_call)
+
+
+def _open_promise(graph, pid, scene, owed=()):
+    graph.write_promise(Promise(promise_id=pid, summary=f"{pid} will be paid off",
+                                planted_in=[scene], owed_by=list(owed),
+                                citations=[Citation(scene=scene, quote="q")]))
+
+
+def test_a_close_whose_quote_is_not_in_the_scene_is_rejected(world):
+    """The same exact test `bp ground` uses, applied before anything is
+    written. A quote that isn't in the scene it names was invented — 391
+    records in the real graph failed exactly this."""
+    from bp.settle import settle
+
+    graph, profile = world
+    scenes = _scene_ids(world)
+    _open_promise(graph, "P-1", scenes[0])
+    graph.commit()
+
+    client = _FakeClient([{"closes": [
+        {"promise_id": "P-1", "quote": "a line that appears nowhere in this corpus", "why": "x"}]}])
+    report = settle(graph, profile, client, model="claude-sonnet-5", max_usd=5.0)
+
+    assert report.closes == [], "an unverifiable quote closes nothing"
+    assert report.rejected_quote, "and it is reported rather than silently dropped"
+    assert graph.conn.execute(
+        "SELECT status FROM promises WHERE promise_id='P-1'").fetchone()[0] == "open"
+
+
+def test_a_close_naming_a_promise_that_was_not_offered_is_rejected(world):
+    from bp.settle import settle
+
+    graph, profile = world
+    scenes = _scene_ids(world)
+    _open_promise(graph, "P-1", scenes[0])
+    graph.commit()
+
+    real_line = " ".join(graph.scene(scenes[1]).text.split()[:6])
+    client = _FakeClient([{"closes": [
+        {"promise_id": "P-not-offered", "quote": real_line, "why": "x"}]}])
+    report = settle(graph, profile, client, model="claude-sonnet-5", max_usd=5.0)
+
+    assert report.closes == []
+    assert report.rejected_unknown
+
+
+def test_a_verified_close_is_only_written_when_applied(world):
+    from bp.settle import settle
+
+    graph, profile = world
+    scenes = _scene_ids(world)
+    _open_promise(graph, "P-1", scenes[0])
+    graph.commit()
+    line = " ".join(graph.scene(scenes[1]).text.split()[:8])
+
+    dry = settle(graph, profile, _FakeClient([{"closes": [
+        {"promise_id": "P-1", "quote": line, "why": "paid here"}]}]),
+        model="claude-sonnet-5", max_usd=5.0)
+    assert len(dry.closes) == 1
+    assert graph.conn.execute(
+        "SELECT status FROM promises WHERE promise_id='P-1'").fetchone()[0] == "open"
+
+    wet = settle(graph, profile, _FakeClient([{"closes": [
+        {"promise_id": "P-1", "quote": line, "why": "paid here"}]}]),
+        model="claude-sonnet-5", max_usd=5.0, apply=True)
+    assert len(wet.closes) == 1
+    row = graph.conn.execute(
+        "SELECT status, paid_in FROM promises WHERE promise_id='P-1'").fetchone()
+    assert row["status"] == "paid" and row["paid_in"]
+
+
+def test_a_closed_promise_is_dropped_from_later_scenes(world):
+    """Lever 3: a promise only needs paying once, and the earliest payoff is
+    the right one. Dropping it is both free accuracy and the only lossless way
+    to shrink the listing, which is 96% of what a run costs."""
+    from bp.settle import settle
+
+    graph, profile = world
+    scenes = _scene_ids(world)
+    _open_promise(graph, "P-1", scenes[0])
+    graph.commit()
+    line = " ".join(graph.scene(scenes[1]).text.split()[:8])
+
+    client = _FakeClient([{"closes": [{"promise_id": "P-1", "quote": line, "why": "paid"}]}])
+    settle(graph, profile, client, model="claude-sonnet-5", max_usd=5.0)
+
+    later = [kw for kw in client.messages.calls[1:]]
+    assert all("P-1" not in kw["messages"][0]["content"] for kw in later), \
+        "once closed it must not be offered to any later scene"
+
+
+def test_the_spend_cap_stops_the_run(world):
+    """The cap lives here because this path does not go through `extract`,
+    where the existing one is."""
+    from bp.settle import settle
+
+    graph, profile = world
+    scenes = _scene_ids(world)
+    for i, s in enumerate(scenes[:3]):
+        _open_promise(graph, f"P-{i}", s)
+    graph.commit()
+
+    report = settle(graph, profile, _FakeClient([]), model="claude-sonnet-5", max_usd=0.0)
+    assert report.stopped and "cap" in report.stopped
+    assert report.scenes_read == 0

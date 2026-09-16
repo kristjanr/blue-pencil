@@ -45,7 +45,10 @@ import json
 import statistics
 from dataclasses import dataclass, field
 
+from pydantic import BaseModel, Field
+
 from .db import Graph
+from .grounding import _norm
 from .profile import SeriesProfile
 from .textstats import estimate_tokens
 
@@ -186,3 +189,173 @@ def candidate_index(graph: Graph, profile: SeriesProfile | None = None) -> tuple
         report.prompt_tokens += int(s["tokens"] or 0) + listing
 
     return index, report
+
+
+# ------------------------------------------------------------------- stage two
+SETTLE_SYSTEM = """You decide which of a novel's open promises a given scene pays off.
+
+A promise is a setup the text has made: a prophecy, a vow, a foreshadowing beat, a
+dangling question. It is PAID when the text delivers the thing that was set up — the
+log arrives, the vault opens, the debt is called in.
+
+You are given one scene and a list of promises planted before it. Almost all of them
+are unrelated to this scene. Say so by leaving them out.
+
+Close a promise ONLY when this scene's own words show it being paid off, and quote the
+line that does it. The quote must be copied exactly from the scene text you were given.
+If you cannot point at a line, the answer is no.
+
+Two things to hold on to, because they pull in opposite directions:
+
+A payoff almost never reuses the setup's vocabulary. The setup says "Cyra's log will
+reach Sol one day"; the payoff says "the packet finally decoded, eleven years late".
+Do not require shared wording, and do not go looking for it.
+
+Sharing a subject is not being paid. A scene that mentions the vault, worries about the
+vault, or moves the vault has not opened it. Continuing a thread is not discharging it.
+If the promise could still be paid off later, it is not paid here.
+
+Prefer leaving a promise open. An unpaid promise left open costs a little accuracy in a
+ledger; a promise wrongly closed erases something the book still owes and leaves no
+trace that it did."""
+
+
+class _Close(BaseModel):
+    promise_id: str = Field(description="id from the candidate list, copied exactly")
+    quote: str = Field(description="the line in THIS scene that pays it off, verbatim")
+    why: str = Field(default="", description="one sentence: what was owed, and how this pays it")
+    confidence: float = Field(default=0.5)
+
+
+class _Settlement(BaseModel):
+    closes: list[_Close] = []
+
+
+@dataclass
+class SettleReport:
+    """What a settling run found, and what it cost."""
+
+    scenes_read: int = 0
+    closes: list[tuple[str, str, str, float]] = field(default_factory=list)
+    rejected_quote: list[tuple[str, str]] = field(default_factory=list)
+    rejected_unknown: list[tuple[str, str]] = field(default_factory=list)
+    echoed: int = 0
+    unechoed: int = 0
+    usd: float = 0.0
+    stopped: str = ""
+    errors: list[str] = field(default_factory=list)
+
+    def render(self) -> str:
+        lines = [
+            f"{self.scenes_read} scenes read · {len(self.closes)} promise(s) closed · ${self.usd:,.2f}",
+            f"closes rejected because the quote is not in the scene: {len(self.rejected_quote)}",
+            f"closes naming a promise that was not a candidate: {len(self.rejected_unknown)}",
+        ]
+        if self.closes:
+            # work-ed's check: if it only ever closes promises whose own words
+            # are echoed in the scene, it is doing string matching in an
+            # expensive costume rather than reading.
+            total = self.echoed + self.unechoed
+            lines.append(
+                f"of the closes, {self.unechoed} ({self.unechoed / total:.0%}) were on scenes that do "
+                f"NOT echo the promise's own distinctive words")
+        lines += [f"  {sid}  <-  {pid}  ({conf:.2f}) {why[:70]}"
+                  for sid, pid, why, conf in self.closes[:25]]
+        if self.stopped:
+            lines.append(f"STOPPED: {self.stopped}")
+        lines += [f"error: {e}" for e in self.errors[:8]]
+        return "\n".join(lines)
+
+
+def _distinctive(text: str) -> set[str]:
+    from .grounding import _STOP, _WORD
+
+    return {w for w in (x.lower() for x in _WORD.findall(text)) if w not in _STOP and len(w) > 4}
+
+
+def settle(
+    graph: Graph, profile: SeriesProfile, client, *, model: str,
+    scene_ids: list[str] | None = None, max_usd: float = 1.0,
+    apply: bool = False, progress=lambda _s: None,
+) -> SettleReport:
+    """Ask each scene which of its candidate promises it pays off.
+
+    Walks scenes in reading order and drops a promise from every later scene's
+    list the moment something closes it. A promise only needs paying once, and
+    the earliest payoff is the right one — so this is free accuracy as well as
+    the only lossless way to shrink the candidate listing, which is 96% of what
+    a run costs.
+
+    Two guards, both cheap. A close whose quote is not literally in the scene
+    is rejected here rather than trusted: the same exact test `bp ground` uses,
+    and the same defect it found 391 of. And a close naming a promise that was
+    not on that scene's list is rejected outright.
+
+    Dry by default. `max_usd` is enforced in this loop because the run does not
+    go through `extract`, where the existing cap lives.
+    """
+    from .llm import Usage, rate_for, structured
+
+    index, _ = candidate_index(graph, profile)
+    rows = {r["promise_id"]: dict(r) for r in graph.conn.execute(
+        "SELECT promise_id, summary FROM promises WHERE status='open'")}
+
+    scenes = [dict(r) for r in graph.conn.execute(
+        "SELECT scene_id, text, tokens FROM scenes ORDER BY ord")]
+    if scene_ids is not None:
+        keep = set(scene_ids)
+        scenes = [s for s in scenes if s["scene_id"] in keep]
+
+    report = SettleReport()
+    usage = Usage()
+    closed: set[str] = set()
+
+    for scene in scenes:
+        candidates = [p for p in index.get(scene["scene_id"], []) if p not in closed]
+        if not candidates:
+            continue
+        rate_in, _ = rate_for(model)
+        listing = "\n".join(f"- {pid}: {rows[pid]['summary']}" for pid in candidates if pid in rows)
+        projected = usage.usd + estimate_tokens(listing + scene["text"]) / 1e6 * rate_in
+        if projected > max_usd:
+            report.stopped = (f"spend cap ${max_usd:,.2f} would be exceeded "
+                              f"(${usage.usd:,.2f} spent, {report.scenes_read} scenes read)")
+            break
+
+        prompt = (f"--- SCENE {scene['scene_id']} ---\n{scene['text']}\n\n"
+                  f"--- PROMISES PLANTED BEFORE THIS SCENE ---\n{listing}")
+        try:
+            out = structured(client, model, _Settlement, system=SETTLE_SYSTEM, prompt=prompt,
+                             max_tokens=4_000, usage=usage, stage="settle")
+        except Exception as exc:
+            report.errors.append(f"{scene['scene_id']}: {type(exc).__name__}: {exc}")
+            continue
+        report.scenes_read += 1
+
+        scene_norm = _norm(scene["text"])
+        for c in out.closes:
+            if c.promise_id not in set(candidates):
+                report.rejected_unknown.append((scene["scene_id"], c.promise_id))
+                continue
+            nq = _norm(c.quote)
+            if not nq or nq not in scene_norm:
+                report.rejected_quote.append((scene["scene_id"], c.promise_id))
+                continue
+            closed.add(c.promise_id)
+            report.closes.append((scene["scene_id"], c.promise_id, c.why, c.confidence))
+            shared = _distinctive(rows[c.promise_id]["summary"]) & _distinctive(scene["text"])
+            if shared:
+                report.echoed += 1
+            else:
+                report.unechoed += 1
+            if apply:
+                graph.conn.execute(
+                    "UPDATE promises SET status='paid', paid_in=? WHERE promise_id=?",
+                    (scene["scene_id"], c.promise_id))
+        progress(f"  {scene['scene_id']}: {len(candidates)} candidates, "
+                 f"{len(out.closes)} proposed, ${usage.usd:,.2f} so far")
+
+    report.usd = usage.usd
+    if apply:
+        graph.conn.commit()
+    return report
