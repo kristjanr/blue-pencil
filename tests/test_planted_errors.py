@@ -91,16 +91,41 @@ def test_no_checker_crashes(world, card):
 def test_recall_on_planted_errors(world, card):
     _, sc = _scorecard(world, "planted", card)
     found = sc.marginalia
-    caught, missed = [], []
+    caught, missed, note_only = [], [], []
     for label, check, window in PLANTED:
         hits = [m for m in found if m.check == check]
         if window is not None:
             lo, hi = window
             hits = [m for m in hits if lo <= m.line <= hi]
-        (caught if hits else missed).append(label)
+        # A note is the checker saying "I could not decide". An error that
+        # produces only a note has not been caught in any way a writer would
+        # act on -- it arrives in a pile of several hundred. Recall means the
+        # chapter was actually stopped. Matching on check-and-line alone let a
+        # hard finding silently decay to a note without this gate noticing,
+        # which is exactly what it exists to prevent.
+        acted = [m for m in hits if m.severity in ("hard", "soft")]
+        if acted:
+            caught.append(label)
+        elif hits:
+            note_only.append(label)
+            missed.append(f"{label} (note only — decayed, not absent)")
+        else:
+            missed.append(label)
 
     assert len(caught) >= 18, (
-        f"caught {len(caught)}/20 planted errors; missed:\n  " + "\n  ".join(missed)
+        f"caught {len(caught)}/20 planted errors"
+        + (f", {len(note_only)} of them downgraded to notes" if note_only else "")
+        + "; missed:\n  " + "\n  ".join(missed)
+    )
+    # The recall threshold alone cannot protect against decay: measured, turning
+    # `paths_are_complete` off costs exactly 2 findings, and the threshold has
+    # exactly 2 of slack, so 18/20 still passes while two errors have quietly
+    # stopped stopping the chapter. In a world that declares its paths complete,
+    # no planted error may land as a note -- there is nothing left to be unsure
+    # about.
+    assert not note_only, (
+        "planted errors that produced only notes in a path-complete world:\n  "
+        + "\n  ".join(note_only)
     )
 
 
