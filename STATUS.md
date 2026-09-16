@@ -4,7 +4,7 @@ Living status for the Bobiverse fan-continuation project. Background and the
 engine's design live in [HANDOVER.md](HANDOVER.md) and [README.md](README.md);
 this file is only *current state, who has what, and what happens next*.
 
-Last updated: 2026-09-16
+Last updated: 2026-09-16 (second pass)
 
 ---
 
@@ -64,8 +64,16 @@ real book 6 is a **control sample**, not an answer key.
 **Steps 1–3 cannot be contaminated by knowing book 6.** Memory of the plot cannot
 fake a working light-lag calculation.
 
-**Blocked on:** the improved book 6 transcription (in progress elsewhere — the 1.0×
-recording). Steps 1–2 need that text.
+**Blocked on, precisely** (checked 2026-09-16, and it is not what this file said):
+a book 6 transcript *does* exist — `bookz/Dennis E Taylor - (Bobiverse 06) - The
+Infinite Extent (transcript).md`, 77,525 words, cleaned, with known open items
+listed in `bookz/work/transcription_notes.md`. It came from the **first** capture
+(6h56m). A second, longer capture (8h54m, `recording_2026-09-13.flac`) exists to
+re-check those open items but **has not been transcribed yet**. So the improved
+text is not merely "in progress" — that pass hasn't started.
+**Consequence:** step 1 can be *dry-run* against the existing transcript now, to
+shake out mechanics, and re-run for a real number later. Don't quote a false-alarm
+count taken from the first-capture text.
 
 ### How to drive step 4 when we get there
 **Hands off on content.** Gates to auto; the engine takes its own top thesis and
@@ -173,6 +181,45 @@ the agent working together; a draft is a first pass that survives checking.
 (Kris's verdicts on 126 groups — the gate for any adjudicator).
 
 ---
+
+## Entity duplication, round two — found 2026-09-16
+
+The cast rebuild (`1ff7050`) fixed scene cast, and in doing so exposed that
+**44.1% of cast entries name a character that exists as more than one record**
+(1,642 of 3,722). The top of the cast reads `Bob-1` ×323 *and* `Bob Johansson`
+×308; `Riker` ×175 *and* `Will (Riker)` ×116.
+
+This is worse than the junk it replaced. `knowledge.py:last_placement()` matches
+cast against one canonical name, so a split character is invisible in half his
+scenes and the geography checker returns a stale position **with full confidence**.
+Junk cast was noise; a split character is a false alarm with a straight face — and
+step 1 of the ladder is a false-alarm count. **This gates step 1.**
+
+Verdicts on all 32 groups: `eval/entity_duplicate_verdicts.yaml` (`a798b06`).
+23 merge, 2 partition, 3 stay split, 6 held for Kris. 38 records absorbed.
+Waiting on `blue-pencil-3c` for `merge_group()` + a `bp resolve` CLI to apply it —
+`resolve.py` has `adjudicate()` but no command, so the adjudicator can't run either.
+
+**Three findings worth keeping:**
+- **Frieda is stated distinct in the text** — Bob explicitly confirms this Frieda
+  is not the one he knew. The only place the series says distinctness out loud.
+  Any adjudicator that merges Frieda is broken in the expensive direction.
+- **Spike and Guppy aren't an identity question.** Each Bob runs his own instance
+  of the same VR cat / GUPPI. The graph can't say *same type, different instance*,
+  so this keeps arriving as a merge/split question the schema can't answer.
+- **Four of the six holds are the Charlie shape**: two records contradicting on an
+  invariant (Kiroshi is both "a human general" and "a Bobiverse replicant"; same
+  for Richards). Not a merge question — one description is simply false. With
+  Alexander's "Bob-copy" that is **three instances of a true citation carrying a
+  false description**, and it probably deserves its own checker.
+
+### Waiting on Kris — six groups
+`Bender` vs `Bender's Matrix` (person or substrate?) · `Kiroshi` and `Richards`
+(contradictory records) · `Christie Campbell` vs `Ser Campbell` (one leader in two
+places, or two colonists?) · the bare `Steven` (inside Heaven's River, where a
+human professor shouldn't be) · and the modelling question behind Enoki: **should
+an undercover persona be its own entity?** Bob-1 is not the only Bob who goes
+under a name, so that answer sets a rule for the whole graph.
 
 ## Entity groups deliberately left unmerged
 
