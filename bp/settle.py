@@ -330,7 +330,10 @@ class SettleReport:
     """What a settling run found, and what it cost."""
 
     scenes_read: int = 0
-    closes: list[tuple[str, str, str, float]] = field(default_factory=list)
+    #: scene, promise, why, confidence, and the quote that proved it. The
+    #: quote is the evidence; a close recorded without it cannot be audited
+    #: by anyone, including the next run.
+    closes: list[tuple[str, str, str, float, str]] = field(default_factory=list)
     rejected_quote: list[tuple[str, str, str]] = field(default_factory=list)
     rejected_unknown: list[tuple[str, str]] = field(default_factory=list)
     echoed: int = 0
@@ -394,8 +397,9 @@ class SettleReport:
                 "cache_write_tokens": self.cache_write_tokens,
                 "estimated_input_tokens": self.estimated_input_tokens,
             },
-            "closes": [{"scene": s, "promise_id": p, "why": w, "confidence": c}
-                       for s, p, w, c in self.closes],
+            "closes": [{"scene": s, "promise_id": p, "why": w, "confidence": c,
+                        "quote": q}
+                       for s, p, w, c, q in self.closes],
             "rejected_quote": [{"scene": s, "promise_id": p, "quote": q}
                                for s, p, q in self.rejected_quote],
             "rejected_unknown": [{"scene": s, "promise_id": p} for s, p in self.rejected_unknown],
@@ -426,14 +430,15 @@ class SettleReport:
                 f"of the closes, {self.unechoed} ({self.unechoed / total:.0%}) were on scenes that do "
                 f"NOT echo the promise's own distinctive words")
         lines += [f"  {sid}  <-  {pid}  ({conf:.2f}) {why[:70]}"
-                  for sid, pid, why, conf in self.closes[:25]]
+                  for sid, pid, why, conf, _q in self.closes[:25]]
         if self.stopped:
             lines.append(f"STOPPED: {self.stopped}")
         lines += [f"error: {e}" for e in self.errors[:8]]
         return "\n".join(lines)
 
 
-def _close(graph, promise_id: str, scene_id: str, run_id: str, confidence: float) -> None:
+def _close(graph, promise_id: str, scene_id: str, run_id: str, confidence: float,
+           quote: str = "") -> None:
     """Mark a promise paid, leaving behind what it was and which run did it.
 
     Closing overwrites `status` and `paid_in` on a record that was open, and we
@@ -442,16 +447,18 @@ def _close(graph, promise_id: str, scene_id: str, run_id: str, confidence: float
     hole that made 156 wrong demotions an archaeology exercise.
     """
     before = graph.conn.execute(
-        "SELECT status, paid_in FROM promises WHERE promise_id=?", (promise_id,)).fetchone()
+        "SELECT status, paid_in, paid_quote FROM promises WHERE promise_id=?",
+        (promise_id,)).fetchone()
     if before is None:
         return
-    for fieldname, new in (("status", "paid"), ("paid_in", scene_id)):
+    for fieldname, new in (("status", "paid"), ("paid_in", scene_id), ("paid_quote", quote)):
         if before[fieldname] != new:
             graph.record_change(table="promises", record_id=promise_id, field=fieldname,
                                 old=before[fieldname], new=new, run_id=run_id,
                                 reason=f"settled at confidence {confidence:.2f}")
-    graph.conn.execute("UPDATE promises SET status='paid', paid_in=? WHERE promise_id=?",
-                       (scene_id, promise_id))
+    graph.conn.execute(
+        "UPDATE promises SET status='paid', paid_in=?, paid_quote=? WHERE promise_id=?",
+        (scene_id, quote, promise_id))
 
 
 def _distinctive(text: str) -> set[str]:
@@ -539,14 +546,14 @@ def settle(
                 report.rejected_quote.append((scene["scene_id"], c.promise_id, c.quote))
                 continue
             closed.add(c.promise_id)
-            report.closes.append((scene["scene_id"], c.promise_id, c.why, c.confidence))
+            report.closes.append((scene["scene_id"], c.promise_id, c.why, c.confidence, c.quote))
             shared = _distinctive(rows[c.promise_id]["summary"]) & _distinctive(scene["text"])
             if shared:
                 report.echoed += 1
             else:
                 report.unechoed += 1
             if apply:
-                _close(graph, c.promise_id, scene["scene_id"], run_id, c.confidence)
+                _close(graph, c.promise_id, scene["scene_id"], run_id, c.confidence, c.quote)
         progress(f"  {scene['scene_id']}: {len(candidates)} candidates, "
                  f"{len(out.closes)} proposed, ${usage.usd:,.2f} so far")
 
@@ -660,14 +667,14 @@ def settle_batch(
             if not quote_in_scene(c.quote, scene_norm, scene["text"]):
                 report.rejected_quote.append((scene["scene_id"], c.promise_id, c.quote))
                 continue
-            report.closes.append((scene["scene_id"], c.promise_id, c.why, c.confidence))
+            report.closes.append((scene["scene_id"], c.promise_id, c.why, c.confidence, c.quote))
             shared = _distinctive(rows[c.promise_id]["summary"]) & _distinctive(scene["text"])
             if shared:
                 report.echoed += 1
             else:
                 report.unechoed += 1
             if apply:
-                _close(graph, c.promise_id, scene["scene_id"], run_id, c.confidence)
+                _close(graph, c.promise_id, scene["scene_id"], run_id, c.confidence, c.quote)
 
     report.usd = usage.usd
     _record_spend(report, usage, model)

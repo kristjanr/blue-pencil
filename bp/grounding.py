@@ -86,6 +86,47 @@ def _unescape(s: str) -> str:
     return s.replace("\\\\", "\\")
 
 
+#: How much of a quote has to be findable in the scene before the quote counts
+#: as evidence. Not 1.0, because a faithful quote can lose its tail to an
+#: ellipsis or a trailing typographic difference; nowhere near the old
+#: effective floor either, which accepted a 40-character prefix of a quote of
+#: any length and so could pass 8% coverage.
+_MIN_COVERAGE = 0.85
+
+#: A ratio alone is not enough on a short string: eight of nine characters of
+#: "the and a" will be found in almost any scene, and that is coincidence, not
+#: evidence. Sixteen consecutive normalised characters is a phrase.
+_MIN_COVERED_CHARS = 16
+
+
+def _coverage(needle: str, haystack: str) -> float:
+    """What fraction of ``needle`` sits, as a run from its start, in ``haystack``.
+
+    Substring containment is monotone in the prefix — if the first k characters
+    are present then so are the first k-1 — so the longest present prefix is a
+    binary search rather than a scan.
+    """
+    if not needle:
+        return 0.0
+    if needle in haystack:
+        return 1.0
+    lo, hi = 0, len(needle)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if needle[:mid] in haystack:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo / len(needle)
+
+
+def _verified(needle: str, haystack: str) -> bool:
+    """Enough of the quote found, and enough of it in absolute terms."""
+    covered = _coverage(needle, haystack) * len(needle)
+    return (covered >= _MIN_COVERED_CHARS
+            and covered / len(needle) >= _MIN_COVERAGE)
+
+
 def quote_in_scene(quote: str, scene_norm: str, scene_raw: str = "") -> bool:
     """Is this quote really in this scene? The one place that decides.
 
@@ -99,18 +140,42 @@ def quote_in_scene(quote: str, scene_norm: str, scene_raw: str = "") -> bool:
     Three tests, each strictly weaker than the last, and the loose one only
     ever *rescues* a quote the strict tests rejected — never accuses one they
     accepted.
+
+    Every test is a *coverage* test, and that is the load-bearing part. The
+    earlier shape asked whether the quote's first 40 characters were in the
+    scene and accepted on that, looking at nothing after them. Which meant a
+    quote that opened with real scene text and then ran on into something else
+    entirely was accepted, with the something-else stored as evidence.
+
+    That is not hypothetical. Book one produced three of them: the model's
+    quote truncates at a curly apostrophe and the promise's own summary
+    continues in the quote field —
+
+        scene   : "Oh. My. God. I've hit the jackpot."
+        emitted : "Oh. My. God. I\\Milo's search for habitable planets in
+                   Omicron2 Eridani culminates in ..."
+
+    Fourteen characters of real scene, then a sentence that was never in any
+    scene. All three were caught here only because their matching prefix fell
+    under the 40-character floor — an accident of length, not a check. The same
+    fault in a longer quote would have been accepted silently.
+
+    So: no prefix is accepted on its own account. Whatever fraction of the
+    quote we could not find in the scene is unverified text, and unverified
+    text does not become evidence by sitting next to some that is.
     """
     nq = _norm(_unescape(quote))
     if not nq:
         return False
-    # The model often trims with an ellipsis; a prefix match is still a
-    # faithful quote, so test the longest run we were actually given.
-    if nq in scene_norm or (len(nq) > 40 and nq[:40] in scene_norm):
+    # The model often trims with an ellipsis, and a faithful quote can diverge
+    # slightly at its tail, so an exact whole-string match is too strict. A
+    # mostly-covered quote is still a quote; a barely-covered one is a splice.
+    if _verified(nq, scene_norm):
         return True
     # Punctuation and whitespace are not evidence of invention. The
-    # 60-character floor is what keeps this from rescuing by coincidence.
+    # 30-character floor is what keeps this from rescuing by coincidence.
     lq = _loose(_unescape(quote))
-    return len(lq) > 30 and lq[:60] in _loose(scene_raw)
+    return len(lq) > 30 and _verified(lq, _loose(scene_raw))
 
 
 def _terms(claim: str) -> set[str]:

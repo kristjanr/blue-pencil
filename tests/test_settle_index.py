@@ -380,3 +380,47 @@ def test_a_run_records_the_tokens_that_would_let_the_next_estimate_be_better():
     assert rep.as_dict()["spend"]["output_tokens"] == 100
     assert rep.as_dict()["spend"]["estimated_input_tokens"] == 500
     assert "2.00x" in rep.calibration(), "1000 billed against 500 predicted"
+
+
+def test_a_close_records_the_quote_that_proved_it(world):
+    """Settling verified a quote against the scene and then discarded it, so a
+    paid promise recorded that it was paid and nothing about what paid it.
+    Neither a human nor a later run could audit a close, and after a prompt
+    correction there would be no way to tell which closes rested on what."""
+    from bp.settle import _close
+
+    graph, _ = world
+    scene = graph.scenes()[0]
+    line = " ".join(scene.text.split()[:9])
+    _open_promise(graph, "P-ev", scene.scene_id)
+    graph.commit()
+
+    _close(graph, "P-ev", scene.scene_id, "run-evidence", 0.8, quote=line)
+    graph.commit()
+
+    row = graph.conn.execute(
+        "SELECT status, paid_in, paid_quote FROM promises WHERE promise_id='P-ev'").fetchone()
+    assert row["status"] == "paid"
+    assert row["paid_quote"] == line, "the evidence, not just the verdict"
+
+    trail = {c["field"]: c for c in graph.changes_for("promises", "P-ev")}
+    assert trail["paid_quote"]["new_value"] == line
+    assert all(c["run_id"] == "run-evidence" for c in trail.values())
+
+
+def test_rewriting_a_promise_does_not_silently_drop_its_evidence(world):
+    """`INSERT OR REPLACE` with an explicit column list resets any column the
+    list forgets, so an extraction pass over a settled graph would have wiped
+    every quote without touching a line of settling code."""
+    from bp.models import Promise
+
+    graph, _ = world
+    scene = graph.scenes()[0]
+    cite = [Citation(scene=scene.scene_id, quote=" ".join(scene.text.split()[:8]))]
+    graph.write_promise(Promise(promise_id="P-keep", summary="a setup", planted_in=[scene.scene_id],
+                                status="paid", paid_in=scene.scene_id,
+                                paid_quote="the line that paid it", citations=cite))
+    graph.commit()
+    assert graph.conn.execute(
+        "SELECT paid_quote FROM promises WHERE promise_id='P-keep'").fetchone()[0] \
+        == "the line that paid it"

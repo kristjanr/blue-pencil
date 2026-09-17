@@ -191,6 +191,7 @@ CREATE TABLE IF NOT EXISTS promises (
     owed_by     TEXT DEFAULT '[]',
     status      TEXT DEFAULT 'open',
     paid_in     TEXT DEFAULT '',
+    paid_quote  TEXT DEFAULT '',
     weight      REAL DEFAULT 0.5,
     claim_type  TEXT DEFAULT 'explicit',
     confidence  REAL DEFAULT 1.0
@@ -418,6 +419,16 @@ class Graph:
         have = {r[1] for r in self.conn.execute("PRAGMA table_info(beliefs)")}
         if have and "scene_id" not in have:
             self.conn.execute("ALTER TABLE beliefs ADD COLUMN scene_id TEXT DEFAULT ''")
+            self.conn.commit()
+
+        # The line that closed the promise. Settling verified a quote against
+        # the scene and then threw it away, so a paid promise recorded that it
+        # was paid and nothing about what paid it — leaving no way to audit a
+        # close, or to tell which closes rested on a quote the guard of the day
+        # would now reject.
+        have = {r[1] for r in self.conn.execute("PRAGMA table_info(promises)")}
+        if have and "paid_quote" not in have:
+            self.conn.execute("ALTER TABLE promises ADD COLUMN paid_quote TEXT DEFAULT ''")
             self.conn.commit()
 
     def set_meta(self, key: str, value: str) -> None:
@@ -667,10 +678,11 @@ class Graph:
         self._require("promise", p.promise_id, p.citations)
         self.conn.execute(
             """INSERT OR REPLACE INTO promises
-               (promise_id,summary,kind,planted_in,owed_by,status,paid_in,weight,claim_type,confidence)
-               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+               (promise_id,summary,kind,planted_in,owed_by,status,paid_in,paid_quote,
+                weight,claim_type,confidence)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
             (p.promise_id, p.summary, p.kind, _j(p.planted_in), _j(p.owed_by), p.status, p.paid_in,
-             p.weight, p.claim_type, p.confidence),
+             p.paid_quote, p.weight, p.claim_type, p.confidence),
         )
         self._write_citations("promise", p.promise_id, p.citations)
 

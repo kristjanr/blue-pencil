@@ -148,6 +148,10 @@ class Promise(Claim):
     owed_by: list[str] = Field(default_factory=list)
     status: Literal["open", "paid", "broken", "abandoned"] = "open"
     paid_in: str = ""
+    #: The line that paid it off, verbatim from `paid_in`. Carried on the model
+    #: as well as the table so a rewrite of the promise does not silently drop
+    #: the evidence a settling run established.
+    paid_quote: str = ""
     weight: float = Field(default=0.5, ge=0.0, le=1.0)
 
 

@@ -241,3 +241,43 @@ def test_an_invented_quote_still_fails():
 def test_a_short_quote_is_not_rescued_by_coincidence():
     """Below the floor, loose matching would accept near-anything."""
     assert not _verify("I’t f")
+
+
+# ------------------------------------------------------------------ field bleed
+def test_a_quote_that_runs_on_past_the_scene_is_not_evidence():
+    """Book one, three times: the model's quote truncates at a curly
+    apostrophe and the promise's own summary continues in the quote field.
+
+        scene   : "Oh. My. God. I've hit the jackpot."
+        emitted : "Oh. My. God. I\\Milo's search for habitable planets in
+                   Omicron2 Eridani culminates in ..."
+
+    Fourteen characters of real scene, then a sentence that was in no scene at
+    all. These three were caught only because their matching prefix fell under
+    the old 40-character floor — an accident of length. The same splice in a
+    longer quote was accepted silently, and since an accepted close stored no
+    quote, nothing downstream could ever have found it.
+    """
+    bleed = ("I can’t forget the feeling of being controlled. It was like being "
+             "able to feel a tapeworm moving around inside your skull."
+             + "\\" + "Riker's conditioning is eventually broken and he recovers his "
+             "autonomy, going on to command the fleet at Sol.")
+    assert not _verify(bleed), "real prefix plus invented tail is not a verified quote"
+
+
+def test_a_faithful_quote_wrapped_in_stray_quotation_marks_still_verifies():
+    """Book 1.17.4: the model emitted '"I could do a fly-by."' and the old
+    floors rejected it for being too short to rescue — the line is in the scene
+    exactly. A guard that rejects real quotes manufactures the fabrication it
+    exists to catch, which is the same fault as accepting invented ones."""
+    assert _verify('"I can’t forget the feeling of being controlled."')
+
+
+def test_coverage_is_a_fraction_of_the_whole_quote_not_a_prefix_floor():
+    from bp.grounding import _coverage, _norm
+
+    scene = _norm(_SCENE)
+    assert _coverage(_norm("I can’t forget the feeling"), scene) == 1.0
+    # a long invented tail drags coverage down even with a real opening
+    part = _coverage(_norm("I can’t forget the feeling" + "z" * 200), scene)
+    assert part < 0.2
