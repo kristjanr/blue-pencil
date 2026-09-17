@@ -182,6 +182,21 @@ a payoff record that points at the promise it pays, which would capture those
 duplicate closes by whichever batch result arrives last, which is arbitrary and
 can name the wrong scene.
 
+Both are now fixed (`1001a97`), and `bp settle index` carries a standing ledger
+audit (`b95ced7`, `31807bf`): every paid promise names a scene, carries a quote
+that still verifies against it, and left a trail. Written because the hardened
+write path is the one path these corrections *don't* take — the 41, the entity
+merges, the drop-cap repair and the 142 restored demotions were all applied by
+script, straight to the database. Confirmed able to fail by breaking four records
+one clause at a time on a copy; all four fire, named separately.
+
+**Open, and deliberately not claimed as closed:** whether the drop-cap repair
+stranded any stored evidence. The audit passes, but 354 of the 358 quotes sit in
+books 1-2 while the repair touched 24 *book 5* scenes — so the pass covers a set
+with almost no exposure to the hazard, and the one book-5 quote was written by
+hand after the repair. The clause only bites once books 3-5 carry quotes written
+before it. Check explicitly after that run.
+
 **C. `planted_in` was never pinned the way citations were.** 46 promises point at
 a scene id that does not exist (`book5.15.3`, `B2.66.1` — the same reformatting
 that produced 245 dangling citations), plus 4 with an empty `planted_in`.
