@@ -1,0 +1,790 @@
+<title>Bobiverse Graph Atlas</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  --ground:#e9ecef; --s1:#fbfcfd; --s2:#f1f4f7; --s3:#e4e9ee;
+  --ink:#111418; --ink2:#39424d; --muted:#616c79;
+  --line:#ccd4dc; --line2:#dee5eb;
+  --accent:#0f5ea8; --accent-soft:#d9e8f6;
+  /* non-photo blue: the pencil that never reproduced. grid + spine only. */
+  --nonphoto:#93cfe2;
+  --k1:#2a78d6; --k2:#eb6834; --k3:#1baf7a; --k4:#eda100; --k5:#e87ba4; --k6:#008300;
+  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --d-far:#2a78d6; --d-near:#8fb8e8; --d-mid:#f0efec; --d-near2:#e79a9a; --d-far2:#d03b3b;
+  --display:"Fraunces",Georgia,serif;
+  --ui:"Archivo",system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0d1117; --s1:#151b23; --s2:#1c232c; --s3:#242c36;
+  --ink:#e6edf3; --ink2:#c0cbd6; --muted:#8b97a4;
+  --line:#2a323c; --line2:#212933;
+  --accent:#5aa9f0; --accent-soft:#12304c;
+  --nonphoto:#2f5d6e;
+  --k1:#3987e5; --k2:#d95926; --k3:#199e70; --k4:#c98500; --k5:#d55181; --k6:#008300;
+  --d-far:#3987e5; --d-near:#2d5c8f; --d-mid:#383835; --d-near2:#8f3f3f; --d-far2:#d03b3b;
+}}
+:root[data-theme="dark"]{
+  --ground:#0d1117; --s1:#151b23; --s2:#1c232c; --s3:#242c36;
+  --ink:#e6edf3; --ink2:#c0cbd6; --muted:#8b97a4;
+  --line:#2a323c; --line2:#212933;
+  --accent:#5aa9f0; --accent-soft:#12304c;
+  --nonphoto:#2f5d6e;
+  --k1:#3987e5; --k2:#d95926; --k3:#199e70; --k4:#c98500; --k5:#d55181; --k6:#008300;
+  --d-far:#3987e5; --d-near:#2d5c8f; --d-mid:#383835; --d-near2:#8f3f3f; --d-far2:#d03b3b;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:var(--ui); font-size:15px; line-height:1.55;
+  padding-left:20px; padding-right:20px; padding-block:0 64px;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px;margin:0 auto}
+h1,h2,h3{margin:0;font-family:var(--display);text-wrap:balance}
+h1{font-size:clamp(30px,5.2vw,46px);font-weight:800;letter-spacing:-.02em;line-height:1.05}
+h2{font-size:21px;font-weight:600;letter-spacing:-.01em}
+h3{font-size:15px;font-weight:600}
+p{margin:0 0 12px}
+a{color:var(--accent)}
+code,.mono{font-family:var(--mono);font-size:.86em}
+.eyebrow{font-family:var(--ui);font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+header.top{padding-block:40px 24px}
+header.top .lede{font-size:18px;color:var(--ink2);max-width:60ch;margin:14px 0 0;font-family:var(--display);font-weight:400}
+.provenance{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:18px;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.provenance b{color:var(--ink2);font-weight:500}
+
+/* tabs */
+nav.tabs{display:flex;gap:2px;overflow-x:auto;border-bottom:2px solid var(--ink);margin-top:24px;scrollbar-width:none}
+nav.tabs::-webkit-scrollbar{display:none}
+.tab{
+  flex:none;background:none;border:0;border-bottom:3px solid transparent;margin-bottom:-2px;
+  font:inherit;font-size:14px;font-weight:600;color:var(--muted);
+  padding:10px 14px;cursor:pointer;white-space:nowrap;
+}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+
+section.view{padding-block:26px}
+.viewhead{margin-bottom:16px}
+.viewhead p{color:var(--ink2);max-width:66ch;margin:8px 0 0;font-size:14.5px}
+
+/* honesty strip — what a view is not showing */
+.hides{
+  display:flex;gap:10px;align-items:flex-start;
+  background:var(--s2);border-left:3px solid var(--nonphoto);
+  border-radius:0 5px 5px 0;padding:10px 14px;margin-top:14px;
+  font-size:13.5px;color:var(--ink2);
+}
+.hides b{font-weight:600;color:var(--ink)}
+
+/* tiles */
+.tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:22px}
+.tile{background:var(--s1);border:1px solid var(--line);border-radius:7px;padding:14px 16px}
+.tile .v{font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+.tile .l{font-size:12.5px;color:var(--muted);margin-top:3px}
+.tile .n{font-size:12px;color:var(--ink2);margin-top:7px;padding-top:7px;border-top:1px solid var(--line2)}
+
+.panel{background:var(--s1);border:1px solid var(--line);border-radius:8px;padding:18px}
+.grid2{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+
+/* bars */
+.bar-row{display:grid;grid-template-columns:104px 1fr 58px;align-items:center;gap:10px;margin-bottom:6px}
+.bar-row .lab{font-size:13px;color:var(--ink2)}
+.bar-track{background:var(--s3);border-radius:0 3px 3px 0;height:16px}
+.bar{height:16px;border-radius:0 3px 3px 0}
+.bar-row .val{font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;text-align:right;color:var(--ink2)}
+
+/* legend */
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink2)}
+.chip svg{flex:none}
+.dot{width:9px;height:9px;border-radius:50%;flex:none}
+
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+input[type=search],select{
+  font-family:var(--ui);font-size:13.5px;color:var(--ink);background:var(--s1);
+  border:1px solid var(--line);border-radius:6px;padding:8px 10px;
+}
+input[type=search]{flex:1 1 200px;min-width:0}
+input[type=range]{accent-color:var(--accent);flex:1 1 130px;min-width:110px}
+.ctl-lab{font-size:12.5px;color:var(--muted);white-space:nowrap}
+
+/* tables */
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);text-align:left;padding:0 12px 7px 0;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px 12px 7px 0;border-bottom:1px solid var(--line2);vertical-align:top}
+td.r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;padding-right:16px}
+tbody tr:last-child td{border-bottom:0}
+
+/* figures */
+figure{margin:16px 0 0}
+figure svg{max-width:100%;height:auto;display:block}
+figcaption{font-size:13px;color:var(--muted);margin-top:9px;max-width:64ch}
+.plot{background:var(--s1);border:1px solid var(--line);border-radius:8px;padding:10px}
+
+/* entity browser */
+.panes{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);gap:16px}
+@media (max-width:820px){.panes{grid-template-columns:1fr}}
+.list{background:var(--s1);border:1px solid var(--line);border-radius:8px;max-height:460px;overflow-y:auto}
+.ent{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line2);padding:8px 12px;cursor:pointer;color:var(--ink);font:inherit;font-size:13.5px}
+.ent:hover{background:var(--s2)}
+.ent[aria-current=true]{background:var(--accent-soft)}
+.ent .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ent .deg{font-family:var(--mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.detail{background:var(--s1);border:1px solid var(--line);border-radius:8px;padding:16px;min-height:120px}
+.detail .sub{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin:3px 0 10px;word-break:break-word}
+.factrow{display:grid;grid-template-columns:92px 1fr;gap:4px 10px;font-size:13.5px;margin-bottom:3px}
+.factrow dt{font-family:var(--mono);font-size:11.5px;color:var(--muted);padding-top:2px}
+.factrow dd{margin:0;color:var(--ink2)}
+.nbr{display:flex;align-items:baseline;gap:8px;font-size:13.5px;padding:4px 0;border-bottom:1px solid var(--line2)}
+.nbr .rel{font-family:var(--mono);font-size:10.5px;color:var(--muted);width:98px;flex:none}
+.nbr .w{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:auto;font-variant-numeric:tabular-nums}
+.linkish{background:none;border:0;padding:0;font:inherit;color:var(--accent);cursor:pointer;text-align:left}
+.linkish:hover{text-decoration:underline}
+.flag{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:3px;border:1px solid currentColor;margin-left:6px;vertical-align:1px}
+.flag.inf{color:var(--muted)}
+.flag.dis{color:var(--critical)}
+.flag.amb{color:var(--serious)}
+.status{padding:18px;font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.tip{position:fixed;pointer-events:none;z-index:50;background:var(--s1);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:12.5px;max-width:260px;box-shadow:0 4px 14px rgba(0,0,0,.14);opacity:0;transition:opacity .1s}
+.tip.on{opacity:1}
+.tip .t{font-weight:600;margin-bottom:2px}
+.tip .m{color:var(--muted);font-family:var(--mono);font-size:11px}
+ul.tight{margin:8px 0 0;padding-left:18px}
+ul.tight li{margin-bottom:6px;color:var(--ink2);font-size:14px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <span class="eyebrow">Blue Pencil · extraction viewer</span>
+  <h1>Bobiverse Story Graph</h1>
+  <p class="lede">2,095 entities and 4,953 derived relationships pulled out of five novels — drawn five ways, because the structure underneath is five different shapes.</p>
+  <div class="provenance">
+    <span><b>source</b> graph/bobiverse.sqlite</span>
+    <span><b>via</b> bp export · bp/export.py</span>
+    <span><b>scenes</b> 836</span>
+    <span><b>books</b> 5</span>
+    <span><b>no book text</b> structure and paraphrase only</span>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Views">
+  <button class="tab" role="tab" id="tab-coverage" aria-selected="true" aria-controls="v-coverage">Coverage</button>
+  <button class="tab" role="tab" id="tab-entities" aria-selected="false" aria-controls="v-entities">Entity graph</button>
+  <button class="tab" role="tab" id="tab-lineage" aria-selected="false" aria-controls="v-lineage">Lineage</button>
+  <button class="tab" role="tab" id="tab-promises" aria-selected="false" aria-controls="v-promises">Promise ledger</button>
+  <button class="tab" role="tab" id="tab-beliefs" aria-selected="false" aria-controls="v-beliefs">Belief matrix</button>
+</nav>
+
+<!-- COVERAGE -->
+<section class="view" id="v-coverage" role="tabpanel" aria-labelledby="tab-coverage">
+  <div class="viewhead">
+    <h2>What the extractor actually caught</h2>
+    <p>The counts first, then the two residues that decide how much to trust a drawn edge: references that resolved to nothing, and names that several entities share.</p>
+  </div>
+  <div class="tiles" id="cov-tiles"></div>
+  <div class="grid2">
+    <div class="panel">
+      <h3>Entities by kind</h3>
+      <div id="kind-bars" style="margin-top:12px"></div>
+      <div class="legend" id="kind-legend"></div>
+    </div>
+    <div class="panel">
+      <h3>Derived edges by kind</h3>
+      <div id="edge-bars" style="margin-top:12px"></div>
+      <div id="edge-kinds-note" style="margin-top:14px;font-size:12.5px;color:var(--muted)"></div>
+    </div>
+  </div>
+  <div class="hides" id="cov-hides"></div>
+  <div class="grid2" style="margin-top:16px">
+    <div class="panel">
+      <h3>Resolved to nothing</h3>
+      <p style="font-size:13.5px;color:var(--ink2);margin-top:6px">Strings in a participant or cast list matching no entity. Some are real characters never extracted; some are collective nouns that should never be nodes.</p>
+      <div class="scroll"><table id="unresolved-table"><thead><tr><th>Reference</th><th class="r">Mentions</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="panel">
+      <h3>Names shared by several entities</h3>
+      <p style="font-size:13.5px;color:var(--ink2);margin-top:6px">Tie-broken to the most-cited candidate. Every edge touching one of these is marked <span class="flag amb">amb</span> wherever it is drawn.</p>
+      <div class="scroll"><table id="ambig-table"><thead><tr><th>Name</th><th>Resolved to</th><th class="r">Mentions</th><th>Passed over</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ENTITIES -->
+<section class="view" id="v-entities" role="tabpanel" aria-labelledby="tab-entities" hidden>
+  <div class="viewhead">
+    <h2>Who stands near whom</h2>
+    <p>Co-participation, observation and shared threads, aggregated. A pair appearing in forty events is one edge of weight 40 — thickness is that weight, never forty lines.</p>
+  </div>
+  <div class="controls">
+    <input type="search" id="q" placeholder="search name, alias or id…" aria-label="Search entities">
+    <select id="kind-filter" aria-label="Filter by kind"><option value="">all kinds</option></select>
+    <select id="edge-filter" aria-label="Filter by edge kind"><option value="">all edge kinds</option></select>
+    <label class="ctl-lab" for="topn">nodes</label>
+    <input type="range" id="topn" min="30" max="300" step="10" value="120">
+    <span class="ctl-lab num" id="topn-out">120</span>
+  </div>
+  <div class="panel plot"><figure style="margin:0"><svg id="force" viewBox="0 0 900 560" role="img" aria-label="Force-directed graph of the most connected entities"></svg></figure></div>
+  <div class="legend" id="force-legend"></div>
+  <div class="hides" id="ent-hides"></div>
+  <div class="panes" style="margin-top:16px">
+    <div class="list" id="list"><div class="status">loading…</div></div>
+    <div class="detail" id="detail"><div class="status">pick an entity</div></div>
+  </div>
+</section>
+
+<!-- LINEAGE -->
+<section class="view" id="v-lineage" role="tabpanel" aria-labelledby="tab-lineage" hidden>
+  <div class="viewhead">
+    <h2>The replicant lineage</h2>
+    <p>Ninety <code>forked_from</code> edges — a copy pointing back at the mind it diverged from. The only edge kind the database states outright rather than having inferred from co-occurrence, which makes it the one spine here that needs no tie-break.</p>
+  </div>
+  <div class="panel plot"><figure style="margin:0"><svg id="lineage" viewBox="0 0 900 520" role="img" aria-label="Forest of replicant fork lineages"></svg></figure></div>
+  <div class="hides" id="lin-hides"></div>
+</section>
+
+<!-- PROMISES -->
+<section class="view" id="v-promises" role="tabpanel" aria-labelledby="tab-promises" hidden>
+  <div class="viewhead">
+    <h2>What the text promised, and where it paid</h2>
+    <p>Every promise is planted somewhere on the 836-scene spine. An arc lands where it was paid off; a stem that rises and stops is a setup still owed.</p>
+  </div>
+  <div class="controls">
+    <label class="ctl-lab" for="pweight">minimum weight</label>
+    <input type="range" id="pweight" min="0" max="0.9" step="0.1" value="0">
+    <span class="ctl-lab num" id="pweight-out">0.0</span>
+    <select id="pkind" aria-label="Filter by promise kind"><option value="">all kinds</option></select>
+  </div>
+  <div class="panel plot"><figure style="margin:0"><svg id="arcs" viewBox="0 0 900 300" role="img" aria-label="Arc diagram of promises planted and paid across the scene spine"></svg></figure></div>
+  <div class="legend" id="arc-legend"></div>
+  <div class="hides" id="pro-hides"></div>
+</section>
+
+<!-- BELIEFS -->
+<section class="view" id="v-beliefs" role="tabpanel" aria-labelledby="tab-beliefs" hidden>
+  <div class="viewhead">
+    <h2>Who is wrong about what</h2>
+    <p>One cell is one character's state about one event. Coloured by how far the belief sits from the truth — accurate at one pole, actively false at the other, with plain ignorance as the neutral middle.</p>
+  </div>
+  <div class="panel plot"><figure style="margin:0"><svg id="matrix" viewBox="0 0 900 520" role="img" aria-label="Matrix of character beliefs about events"></svg></figure></div>
+  <div class="legend" id="belief-legend"></div>
+  <div class="hides" id="bel-hides"></div>
+  <div class="panel" style="margin-top:16px">
+    <h3>Where the graph disagrees with itself</h3>
+    <p style="font-size:13.5px;color:var(--ink2);margin-top:6px">Events carrying more than one belief state across characters — the raw material for an epistemic check, and the place a bad extraction shows up first.</p>
+    <div class="scroll"><table id="split-table"><thead><tr><th>Event</th><th>States held</th><th class="r">Characters</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+<section class="view" style="border-top:1px solid var(--line);padding-top:22px">
+  <h3>Reading these drawings honestly</h3>
+  <ul class="tight">
+    <li><b>Nothing here is a fact the database stated.</b> The <code>relationships</code> table is empty; every edge is derived, and <code>edge_kinds</code> in the export records how each one was built.</li>
+    <li><b>An <span class="flag inf">inf</span> record was concluded by a model</b>, not read off the page; <span class="flag dis">dis</span> is disputed. They are drawn lighter and dashed, never like an explicit claim.</li>
+    <li><b>Events carry a day range, not a date.</b> Where a span is drawn it is <code>day_lo</code>–<code>day_hi</code>; a point would invent precision the extractor never claimed.</li>
+    <li><b>No scene prose and no citation quotes are in this page</b>, by design — so a claim can be traced to a scene id here, but the check of whether the quote supports it has to happen against the database.</li>
+  </ul>
+</section>
+
+</div>
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+const GRAPH_URL = "graph.json", DETAIL_URL = "detail.json";
+const KIND_ORDER = ["character","place","faction","ship","organisation","other"];
+const KIND_VAR = {character:"--k1",place:"--k2",faction:"--k3",ship:"--k4",organisation:"--k5",other:"--k6"};
+const BELIEF_ORDER = ["knows","suspects","unaware","believes_false","misinformed"];
+const BELIEF_VAR = {knows:"--d-far",suspects:"--d-near",unaware:"--d-mid",believes_false:"--d-near2",misinformed:"--d-far2"};
+const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#888";
+const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = n => Number(n).toLocaleString();
+const SVGNS = "http://www.w3.org/2000/svg";
+function el(tag,attrs,parent){const n=document.createElementNS(SVGNS,tag);for(const k in attrs)n.setAttribute(k,attrs[k]);if(parent)parent.appendChild(n);return n;}
+
+let G=null, D=null, byId=new Map(), adj=new Map(), selected=null, ambiguousIds=new Set();
+
+/* ---------- tooltip ---------- */
+const tipEl=document.getElementById("tip");
+function tipOn(evt,title,meta){tipEl.innerHTML=`<div class="t">${esc(title)}</div>${meta?`<div class="m">${esc(meta)}</div>`:""}`;tipEl.classList.add("on");tipMove(evt);}
+function tipMove(evt){const p=12,w=tipEl.offsetWidth,h=tipEl.offsetHeight;let x=evt.clientX+p,y=evt.clientY+p;if(x+w>innerWidth-8)x=evt.clientX-w-p;if(y+h>innerHeight-8)y=evt.clientY-h-p;tipEl.style.left=x+"px";tipEl.style.top=y+"px";}
+function tipOff(){tipEl.classList.remove("on");}
+function hoverable(node,title,meta){
+  node.addEventListener("mouseenter",e=>tipOn(e,title,meta));
+  node.addEventListener("mousemove",tipMove);
+  node.addEventListener("mouseleave",tipOff);
+}
+
+/* ---------- tabs ---------- */
+const VIEWS=["coverage","entities","lineage","promises","beliefs"];
+let drawn={};
+function selectTab(name){
+  for(const v of VIEWS){
+    const t=document.getElementById("tab-"+v), s=document.getElementById("v-"+v);
+    const on = v===name;
+    t.setAttribute("aria-selected",on?"true":"false");
+    s.hidden=!on;
+  }
+  try{localStorage.setItem("bp-viz-tab",name);}catch(e){}
+  if(name==="entities"&&!drawn.entities){drawForce();drawn.entities=1;}
+  if(name==="lineage"&&!drawn.lineage){drawLineage();drawn.lineage=1;}
+  if((name==="promises"||name==="beliefs")&&!D){loadDetail().then(()=>{if(name==="promises"){drawArcs();drawn.promises=1;}else{drawMatrix();drawn.beliefs=1;}});}
+  else if(name==="promises"&&!drawn.promises){drawArcs();drawn.promises=1;}
+  else if(name==="beliefs"&&!drawn.beliefs){drawMatrix();drawn.beliefs=1;}
+}
+for(const v of VIEWS) document.getElementById("tab-"+v).addEventListener("click",()=>selectTab(v));
+
+/* ---------- load ---------- */
+fetch(GRAPH_URL).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
+  .then(d=>{G=d;boot();})
+  .catch(e=>{document.getElementById("cov-tiles").innerHTML=`<div class="status">could not load graph.json (${esc(e.message)})</div>`;});
+
+let detailPromise=null;
+function loadDetail(){
+  if(detailPromise) return detailPromise;
+  for(const id of ["arcs","matrix"]){const s=document.getElementById(id);s.innerHTML="";el("text",{x:20,y:30,fill:cssv("--muted"),"font-family":"var(--mono)","font-size":12},s).textContent="loading detail.json (8.5 MB)…";}
+  detailPromise=fetch(DETAIL_URL).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}).then(d=>{D=d;return d;});
+  return detailPromise;
+}
+
+function boot(){
+  for(const e of G.entities) byId.set(e.entity_id,e);
+  for(const ed of G.edges){
+    if(!adj.has(ed.source)) adj.set(ed.source,[]);
+    if(!adj.has(ed.target)) adj.set(ed.target,[]);
+    adj.get(ed.source).push({other:ed.target,kind:ed.kind,count:ed.count,out:true});
+    adj.get(ed.target).push({other:ed.source,kind:ed.kind,count:ed.count,out:false});
+  }
+  for(const cands of Object.values(G.data_quality.ambiguous_names||{})) for(const c of cands) ambiguousIds.add(c);
+  drawCoverage();
+  buildEntityList();
+  let start="coverage";
+  try{const s=localStorage.getItem("bp-viz-tab");if(s&&VIEWS.includes(s))start=s;}catch(e){}
+  selectTab(start);
+}
+const deg = id => (adj.get(id)||[]).length;
+
+/* ---------- coverage ---------- */
+function bars(node,rows,colorFn){
+  const max=Math.max(...rows.map(r=>r[1]),1);
+  node.innerHTML=rows.map(([k,n])=>`<div class="bar-row"><span class="lab">${esc(k)}</span><div class="bar-track"><div class="bar" style="width:${(n/max*100).toFixed(1)}%;background:${colorFn(k)}"></div></div><span class="val">${fmt(n)}</span></div>`).join("");
+}
+function drawCoverage(){
+  const c=G.counts, dq=G.data_quality;
+  const inferred=G.entities.filter(e=>e.claim_type!=="explicit").length;
+  document.getElementById("cov-tiles").innerHTML=[
+    [fmt(c.entities),"entities",`${fmt(c.isolated_entities)} with no edge at all`],
+    [fmt(c.edges),"derived edges",`across ${Object.keys(c.edges_by_kind).length} kinds, none declared`],
+    [fmt(c.events),"events",`${fmt(c.beliefs)} beliefs attached`],
+    [fmt(dq.unresolved_mentions),"unresolved mentions",`${fmt(dq.unresolved_distinct)} distinct strings`],
+    [fmt(inferred),"entities not stated",`concluded by a model, drawn dashed`],
+  ].map(([v,l,n])=>`<div class="tile"><div class="v">${v}</div><div class="l">${l}</div><div class="n">${n}</div></div>`).join("");
+
+  const kindRows=KIND_ORDER.filter(k=>c.entities_by_kind[k]).map(k=>[k,c.entities_by_kind[k]]);
+  bars(document.getElementById("kind-bars"),kindRows,k=>cssv(KIND_VAR[k]||"--muted"));
+  document.getElementById("kind-legend").innerHTML=kindRows.map(([k])=>
+    `<span class="chip">${shapeChip(k)}${esc(k)}</span>`).join("");
+
+  const edgeRows=Object.entries(c.edges_by_kind).sort((a,b)=>b[1]-a[1]);
+  bars(document.getElementById("edge-bars"),edgeRows,()=>cssv("--accent"));
+  document.getElementById("edge-kinds-note").innerHTML=edgeRows.map(([k])=>
+    `<div style="margin-bottom:4px"><span class="mono" style="color:var(--ink2)">${esc(k)}</span> — ${esc(G.edge_kinds[k]||"")}</div>`).join("")
+    +`<div style="margin-top:6px;opacity:.75"><span class="mono" style="color:var(--ink2)">declared</span> — ${esc(G.edge_kinds.declared||"")} <b>(0)</b></div>`;
+
+  document.getElementById("cov-hides").innerHTML=
+    `<span><b>${fmt(c.isolated_entities)} of ${fmt(c.entities)} entities have no edge</b> — mostly places, factions and ships named in prose but never in an event cast. They are counted here and listed in the entity view rather than dropped, because a graph that quietly omits three quarters of its nodes misreports its own coverage.</span>`;
+
+  const tb=document.querySelector("#unresolved-table tbody");
+  tb.innerHTML=(dq.top_unresolved||[]).slice(0,12).map(([n,k])=>
+    `<tr><td class="mono">${esc(n)}</td><td class="r">${fmt(k)}</td></tr>`).join("");
+
+  const counts=new Map(dq.ambiguous_mention_counts||[]);
+  const rows=Object.entries(dq.ambiguous_names||{}).sort((a,b)=>(counts.get(b[0])||0)-(counts.get(a[0])||0)).slice(0,12).map(([name,cands])=>{
+    const winner=cands.slice().sort((a,b)=>deg(b)-deg(a))[0];
+    const chosen=byId.get(winner);
+    return `<tr><td class="mono">${esc(name)}</td><td><span class="mono">${esc(winner)}</span>${chosen?`<br><span style="font-size:12px;color:var(--muted)">${esc(chosen.name)}</span>`:""}</td><td class="r">${fmt(counts.get(name)||0)}</td><td class="mono" style="font-size:11.5px;color:var(--muted)">${cands.filter(x=>x!==winner).map(esc).join(", ")}</td></tr>`;
+  });
+  document.querySelector("#ambig-table tbody").innerHTML=rows.join("");
+}
+
+/* ---------- shapes: the secondary channel, so kind never rests on hue ---------- */
+function shapePath(kind,x,y,r){
+  switch(kind){
+    case "character": return null; // circle
+    case "place":     return `M${x-r},${y-r}h${2*r}v${2*r}h${-2*r}z`;
+    case "faction":   return `M${x},${y-r*1.25}L${x+r*1.25},${y}L${x},${y+r*1.25}L${x-r*1.25},${y}z`;
+    case "ship":      return `M${x},${y-r*1.3}L${x+r*1.15},${y+r*0.85}L${x-r*1.15},${y+r*0.85}z`;
+    case "organisation":{const p=[];for(let i=0;i<6;i++){const a=Math.PI/6+i*Math.PI/3;p.push(`${(x+r*1.15*Math.cos(a)).toFixed(1)},${(y+r*1.15*Math.sin(a)).toFixed(1)}`);}return "M"+p.join("L")+"z";}
+    default:{const s=r*0.55;return `M${x-s},${y-r}h${2*s}v${r-s}h${r-s}v${2*s}h${-(r-s)}v${r-s}h${-2*s}v${-(r-s)}h${-(r-s)}v${-2*s}h${r-s}z`;}
+  }
+}
+function shapeChip(kind){
+  const c=cssv(KIND_VAR[kind]||"--muted");
+  const d=shapePath(kind,7,7,5);
+  return `<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">${d?`<path d="${d}" fill="${c}"/>`:`<circle cx="7" cy="7" r="5" fill="${c}"/>`}</svg>`;
+}
+function drawNode(parent,kind,x,y,r,fill,extra){
+  const d=shapePath(kind,x,y,r);
+  const a=Object.assign({fill},extra||{});
+  if(d){a.d=d;return el("path",a,parent);}
+  a.cx=x;a.cy=y;a.r=r;return el("circle",a,parent);
+}
+
+/* ---------- entity graph ---------- */
+function drawForce(){
+  const svg=document.getElementById("force");
+  svg.innerHTML="";
+  const W=900,H=560;
+  const kindF=document.getElementById("kind-filter").value;
+  const edgeF=document.getElementById("edge-filter").value;
+  const N=+document.getElementById("topn").value;
+
+  let edges=G.edges.filter(e=>!edgeF||e.kind===edgeF);
+  const w=new Map();
+  for(const e of edges){w.set(e.source,(w.get(e.source)||0)+e.count);w.set(e.target,(w.get(e.target)||0)+e.count);}
+  let pool=G.entities.filter(e=>w.has(e.entity_id)&&(!kindF||e.kind===kindF));
+  pool.sort((a,b)=>(w.get(b.entity_id)||0)-(w.get(a.entity_id)||0));
+  const nodes=pool.slice(0,N);
+  const keep=new Set(nodes.map(n=>n.entity_id));
+  const links=edges.filter(e=>keep.has(e.source)&&keep.has(e.target));
+
+  if(!nodes.length){el("text",{x:20,y:30,fill:cssv("--muted"),"font-size":13},svg).textContent="nothing matches these filters";return;}
+
+  // Fruchterman-Reingold, run to settle then drawn static — a jittering layout is harder to read.
+  const idx=new Map(nodes.map((n,i)=>[n.entity_id,i]));
+  const P=nodes.map((n,i)=>{const a=2*Math.PI*i/nodes.length;return{x:W/2+Math.cos(a)*W/3.4,y:H/2+Math.sin(a)*H/3.4,dx:0,dy:0};});
+  const area=W*H, k=Math.sqrt(area/nodes.length)*1.18;
+  const L=links.map(e=>({s:idx.get(e.source),t:idx.get(e.target),w:Math.min(1+Math.log2(e.count),6)}));
+  let temp=W/9;
+  for(let it=0;it<340;it++){
+    for(const p of P){p.dx=0;p.dy=0;}
+    for(let i=0;i<P.length;i++)for(let j=i+1;j<P.length;j++){
+      let ddx=P[i].x-P[j].x, ddy=P[i].y-P[j].y;
+      let d2=ddx*ddx+ddy*ddy; if(d2<0.01){ddx=Math.random()-0.5;ddy=Math.random()-0.5;d2=0.01;}
+      const f=k*k/d2;
+      P[i].dx+=ddx*f;P[i].dy+=ddy*f;P[j].dx-=ddx*f;P[j].dy-=ddy*f;
+    }
+    for(const e of L){
+      const a=P[e.s],b=P[e.t];
+      let ddx=a.x-b.x, ddy=a.y-b.y;
+      const d=Math.sqrt(ddx*ddx+ddy*ddy)||0.01;
+      const f=(d*d/k)*(0.26+0.13*e.w)/d;
+      a.dx-=ddx*f;a.dy-=ddy*f;b.dx+=ddx*f;b.dy+=ddy*f;
+    }
+    for(const p of P){
+      p.dx+=(W/2-p.x)*0.005; p.dy+=(H/2-p.y)*0.005;
+      const d=Math.hypot(p.dx,p.dy)||1, m=Math.min(d,temp);
+      p.x=Math.max(26,Math.min(W-26,p.x+p.dx/d*m));
+      p.y=Math.max(26,Math.min(H-26,p.y+p.dy/d*m));
+    }
+    temp*=0.975;
+  }
+
+  const gE=el("g",{},svg), gN=el("g",{},svg), gT=el("g",{},svg);
+  const maxC=Math.max(...links.map(e=>e.count),1);
+  for(const e of links){
+    const a=P[idx.get(e.source)],b=P[idx.get(e.target)];
+    const amb=ambiguousIds.has(e.source)||ambiguousIds.has(e.target);
+    const ln=el("line",{x1:a.x.toFixed(1),y1:a.y.toFixed(1),x2:b.x.toFixed(1),y2:b.y.toFixed(1),
+      stroke:cssv(amb?"--serious":"--line"),
+      "stroke-width":(0.5+2.6*Math.sqrt(e.count/maxC)).toFixed(2),
+      "stroke-opacity":amb?0.72:0.6,
+      "stroke-linecap":"round"},gE);
+    if(amb) ln.setAttribute("stroke-dasharray","4 3");
+    hoverable(ln,`${byId.get(e.source)?.name||e.source} — ${byId.get(e.target)?.name||e.target}`,
+      `${e.kind} · weight ${e.count}${amb?" · endpoint tie-broken from an ambiguous name":""}`);
+  }
+  const maxW=Math.max(...nodes.map(n=>w.get(n.entity_id)||1),1);
+  const placedLabels=[];
+  nodes.forEach((n,i)=>{
+    const p=P[i], r=3.4+7.6*Math.sqrt((w.get(n.entity_id)||1)/maxW);
+    const inferred=n.claim_type!=="explicit";
+    const node=drawNode(gN,n.kind,p.x,p.y,r,cssv(KIND_VAR[n.kind]||"--muted"),{
+      stroke:cssv("--s1"),"stroke-width":1.4,
+      "fill-opacity":inferred?0.42:1,
+      style:"cursor:pointer"
+    });
+    if(inferred){node.setAttribute("stroke",cssv(KIND_VAR[n.kind]||"--muted"));node.setAttribute("stroke-dasharray","2.5 2");}
+    hoverable(node,n.name,`${n.kind} · weight ${fmt(w.get(n.entity_id)||0)} · ${deg(n.entity_id)} edges · ${n.claim_type}`);
+    node.addEventListener("click",()=>{show(n.entity_id);document.getElementById("detail").scrollIntoView({block:"nearest",behavior:"smooth"});});
+    if(i<18){
+      const label=n.name.length>20?n.name.slice(0,19)+"…":n.name;
+      const lw=label.length*5.8, lx=p.x, ly=p.y-r-6;
+      const clash=placedLabels.some(q=>Math.abs(q.x-lx)<(q.w+lw)/2+4&&Math.abs(q.y-ly)<13);
+      if(!clash){
+        placedLabels.push({x:lx,y:ly,w:lw});
+        const t=el("text",{x:lx.toFixed(1),y:ly.toFixed(1),"text-anchor":"middle",
+          "font-family":"var(--ui)","font-size":11,"font-weight":600,fill:cssv("--ink"),
+          stroke:cssv("--s1"),"stroke-width":3.2,"paint-order":"stroke"},gT);
+        t.textContent=label;
+      }
+    }
+  });
+
+  document.getElementById("force-legend").innerHTML=
+    KIND_ORDER.filter(k=>G.counts.entities_by_kind[k]).map(k=>`<span class="chip">${shapeChip(k)}${esc(k)}</span>`).join("")
+    +`<span class="chip"><svg width="20" height="12" aria-hidden="true"><line x1="1" y1="6" x2="19" y2="6" stroke="${cssv("--serious")}" stroke-width="2" stroke-dasharray="4 3"/></svg>ambiguous endpoint</span>`
+    +`<span class="chip"><svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="${cssv("--k1")}" fill-opacity="0.42" stroke="${cssv("--k1")}" stroke-dasharray="2.5 2"/></svg>inferred, not stated</span>`;
+
+  const isolated=G.counts.isolated_entities;
+  document.getElementById("ent-hides").innerHTML=
+    `<span><b>Showing ${nodes.length} of ${fmt(pool.length)} connected entities</b> and ${fmt(links.length)} of ${fmt(edges.length)} edges, ranked by total edge weight. A further <b>${fmt(isolated)}</b> entities have no edge at all and cannot appear in any layout — they are in the list below under “mentioned only”. Heaviest pair in the corpus: ${heaviest()}.</span>`;
+}
+function heaviest(){
+  let best=G.edges[0];
+  for(const e of G.edges) if(e.count>best.count) best=e;
+  return `${byId.get(best.source)?.name||best.source} — ${byId.get(best.target)?.name||best.target} at ${fmt(best.count)}`;
+}
+
+/* ---------- entity list + detail ---------- */
+function buildEntityList(){
+  const sel=document.getElementById("kind-filter");
+  for(const k of KIND_ORDER) if(G.counts.entities_by_kind[k]){const o=document.createElement("option");o.value=o.textContent=k;sel.append(o);}
+  const es=document.getElementById("edge-filter");
+  for(const k of Object.keys(G.counts.edges_by_kind)){const o=document.createElement("option");o.value=o.textContent=k;es.append(o);}
+  document.getElementById("q").addEventListener("input",renderList);
+  for(const id of ["kind-filter","edge-filter"]) document.getElementById(id).addEventListener("change",()=>{renderList();drawForce();});
+  const tn=document.getElementById("topn");
+  tn.addEventListener("input",()=>{document.getElementById("topn-out").textContent=tn.value;});
+  tn.addEventListener("change",drawForce);
+  renderList();
+}
+function renderList(){
+  const q=document.getElementById("q").value.trim().toLowerCase();
+  const kind=document.getElementById("kind-filter").value;
+  let list=G.entities.filter(e=>{
+    if(kind&&e.kind!==kind) return false;
+    if(!q) return true;
+    return e.name.toLowerCase().includes(q)||e.entity_id.toLowerCase().includes(q)||(e.aliases||[]).some(a=>a.toLowerCase().includes(q));
+  });
+  list.sort((a,b)=>deg(b.entity_id)-deg(a.entity_id)||a.name.localeCompare(b.name));
+  const shown=list.slice(0,200);
+  const node=document.getElementById("list");
+  node.innerHTML=shown.length?shown.map(e=>{
+    const d=deg(e.entity_id);
+    return `<button class="ent" data-id="${esc(e.entity_id)}"${selected===e.entity_id?' aria-current="true"':""}>${shapeChip(e.kind)}<span class="nm">${esc(e.name)}</span><span class="deg">${d||"—"}</span></button>`;
+  }).join("")+(list.length>shown.length?`<div class="status">+ ${fmt(list.length-shown.length)} more — narrow the search</div>`:"")
+   :`<div class="status">nothing matches</div>`;
+  for(const b of node.querySelectorAll(".ent")) b.addEventListener("click",()=>show(b.dataset.id));
+  if(!selected&&shown.length) show(shown[0].entity_id);
+}
+function show(id){
+  selected=id;
+  const e=byId.get(id); if(!e) return;
+  for(const b of document.querySelectorAll(".ent")) b.setAttribute("aria-current",b.dataset.id===id?"true":"false");
+  const merged=new Map();
+  for(const n of (adj.get(id)||[])){
+    const key=n.kind+"|"+n.other;
+    const prev=merged.get(key);
+    if(!prev) merged.set(key,{...n,both:false});
+    else{ prev.both=prev.out!==n.out; if(n.count>prev.count){prev.count=n.count;prev.out=prev.both?true:n.out;} }
+  }
+  const all=[...merged.values()].sort((a,b)=>b.count-a.count);
+  const nbrs=all.slice(0,14);
+  const parent=e.parent_entity?byId.get(e.parent_entity):null;
+  const facts=[["kind",e.kind],["status",e.status],["substrate",e.substrate],
+    ["forked on",e.forked_on],["confidence",Number(e.confidence).toFixed(2)]].filter(([,v])=>v);
+  const badge=e.claim_type==="inferred"?'<span class="flag inf">inf</span>':e.claim_type==="disputed"?'<span class="flag dis">dis</span>':"";
+  const amb=ambiguousIds.has(id)?'<span class="flag amb">amb</span>':"";
+  document.getElementById("detail").innerHTML=`
+    <h3 style="font-family:var(--display);font-size:19px">${esc(e.name)}${badge}${amb}</h3>
+    <div class="sub">${esc(e.entity_id)}${(e.aliases||[]).length?" · aka "+e.aliases.map(esc).join(", "):""}</div>
+    ${e.description?`<p style="font-size:14px;color:var(--ink2)">${esc(e.description)}</p>`:""}
+    <dl class="factrow">${facts.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}
+    ${parent?`<dt>forked from</dt><dd><button class="linkish" data-goto="${esc(parent.entity_id)}">${esc(parent.name)}</button></dd>`:""}</dl>
+    <div class="eyebrow" style="margin:14px 0 6px">${all.length?`${nbrs.length} strongest of ${fmt(all.length)} connection${all.length===1?"":"s"}`:"no edges"}</div>
+    ${nbrs.map(n=>{const o=byId.get(n.other);const dir=n.both?"↔ ":(n.out?"":"← ");return `<div class="nbr"><span class="rel">${dir}${esc(n.kind)}</span><button class="linkish" data-goto="${esc(n.other)}">${esc(o?o.name:n.other)}</button><span class="w">${n.count}</span></div>`;}).join("")
+      ||`<div style="font-size:13.5px;color:var(--muted)">Mentioned only — this entity is named in the prose but never appears in an event cast, a thread, or a fork. It is one of the ${fmt(G.counts.isolated_entities)} the graph cannot place.</div>`}`;
+  for(const b of document.querySelectorAll("[data-goto]")) b.addEventListener("click",()=>{document.getElementById("q").value="";renderList();show(b.dataset.goto);});
+}
+
+/* ---------- lineage ---------- */
+function drawLineage(){
+  const svg=document.getElementById("lineage"); svg.innerHTML="";
+  const W=900;
+  const forks=G.edges.filter(e=>e.kind==="forked_from");
+  const parentOf=new Map(), children=new Map();
+  for(const e of forks){ parentOf.set(e.source,e.target); if(!children.has(e.target))children.set(e.target,[]); children.get(e.target).push(e.source); }
+  const roots=[...new Set(forks.map(e=>e.target))].filter(t=>!parentOf.has(t));
+  const dated=forks.filter(e=>byId.get(e.source)?.fork_day!=null).length;
+
+  const ROW=22, COL=150, PAD=16;
+  let y=PAD+14;
+  const placed=[];
+  const walk=(id,depth)=>{
+    placed.push({id,depth,y});y+=ROW;
+    for(const c of (children.get(id)||[]).sort((a,b)=>(byId.get(a)?.name||a).localeCompare(byId.get(b)?.name||b))) walk(c,depth+1);
+  };
+  for(const r of roots.sort((a,b)=>(children.get(b)||[]).length-(children.get(a)||[]).length)){walk(r,0);y+=8;}
+  const H=y+PAD;
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  const pos=new Map(placed.map(p=>[p.id,p]));
+  const gL=el("g",{},svg), gN=el("g",{},svg);
+  for(const p of placed){
+    const par=parentOf.get(p.id); if(!par||!pos.has(par)) continue;
+    const pp=pos.get(par);
+    const x1=PAD+pp.depth*COL+7, x2=PAD+p.depth*COL;
+    el("path",{d:`M${x1},${pp.y}V${p.y}H${x2}`,fill:"none",stroke:cssv("--nonphoto"),"stroke-width":1.4},gL);
+  }
+  for(const p of placed){
+    const e=byId.get(p.id)||{name:p.id,kind:"other",claim_type:"explicit"};
+    const x=PAD+p.depth*COL;
+    const inferred=e.claim_type!=="explicit";
+    const n=drawNode(gN,e.kind,x,p.y,4.6,cssv(KIND_VAR[e.kind]||"--muted"),{"fill-opacity":inferred?0.42:1,style:"cursor:pointer"});
+    if(inferred){n.setAttribute("stroke",cssv(KIND_VAR[e.kind]||"--muted"));n.setAttribute("stroke-dasharray","2.5 2");}
+    const day=e.fork_day;
+    const nm=(e.name||p.id).length>26?(e.name||p.id).slice(0,25)+"…":(e.name||p.id);
+    const t=el("text",{x:x+9,y:p.y+3.8,"font-family":"var(--ui)","font-size":11.5,fill:cssv("--ink2")},gN);
+    const s1=el("tspan",{},t); s1.textContent=nm;
+    if(day!=null){
+      const s2=el("tspan",{"font-family":"var(--mono)","font-size":10,fill:cssv("--accent")},t);
+      s2.textContent="  day "+day;
+    }
+    hoverable(n,e.name||p.id,`${e.kind} · ${e.status||"status unknown"}${day!=null?" · forked day "+day:" · fork date not recorded"}`);
+    n.addEventListener("click",()=>{selectTab("entities");document.getElementById("q").value="";renderList();show(p.id);});
+  }
+  document.getElementById("lin-hides").innerHTML=
+    `<span><b>Only ${dated} of ${forks.length} forks carry a date.</b> The lineage is therefore drawn by descent, not on a time axis — the vertical order is the tree, not the calendar. Putting these on a timeline would mean inventing 
+    ${forks.length-dated} fork dates the extractor never recorded, so the dates that do exist are printed beside the node instead. ${roots.length} separate roots; deepest chain ${Math.max(...placed.map(p=>p.depth))+1} generations.</span>`;
+}
+
+/* ---------- promise arcs ---------- */
+function drawArcs(){
+  const svg=document.getElementById("arcs"); svg.innerHTML="";
+  const W=900,H=300,PAD=34,BASE=H-46;
+  const minW=+document.getElementById("pweight").value;
+  const kindF=document.getElementById("pkind").value;
+  const sel=document.getElementById("pkind");
+  if(sel.options.length===1){
+    for(const k of [...new Set(D.promises.map(p=>p.kind))].sort()){const o=document.createElement("option");o.value=o.textContent=k;sel.append(o);}
+    sel.addEventListener("change",drawArcs);
+    const pw=document.getElementById("pweight");
+    pw.addEventListener("input",()=>document.getElementById("pweight-out").textContent=(+pw.value).toFixed(1));
+    pw.addEventListener("change",drawArcs);
+  }
+  const ord=new Map(G.scenes.map(s=>[s.scene_id,s.ord]));
+  const maxOrd=Math.max(...ord.values());
+  const X=o=>PAD+(W-2*PAD)*(o/maxOrd);
+  const promises=D.promises.filter(p=>p.weight>=minW&&(!kindF||p.kind===kindF));
+
+  // book bands along the spine, drawn in non-photo blue
+  const gB=el("g",{},svg);
+  for(const b of G.books){
+    const os=G.scenes.filter(s=>s.book_id===b.book_id).map(s=>s.ord);
+    if(!os.length) continue;
+    const x1=X(Math.min(...os)),x2=X(Math.max(...os));
+    el("line",{x1,y1:BASE,x2,y2:BASE,stroke:cssv("--nonphoto"),"stroke-width":3,"stroke-linecap":"butt"},gB);
+    const t=el("text",{x:(x1+x2)/2,y:BASE+18,"text-anchor":"middle","font-family":"var(--mono)","font-size":10,fill:cssv("--muted")},gB);
+    t.textContent=b.book_id;
+    el("line",{x1:x2,y1:BASE-4,x2:x2,y2:BASE+4,stroke:cssv("--muted"),"stroke-width":1},gB);
+  }
+  const gStem=el("g",{},svg), gArc=el("g",{},svg);
+  let paid=0,open=0,unplaced=0;
+  const STATUS={paid:"--good",open:"--accent",abandoned:"--muted"};
+  for(const p of promises){
+    const plant=(p.planted_in||[]).map(s=>ord.get(s)).filter(v=>v!=null);
+    if(!plant.length){unplaced++;continue;}
+    const x1=X(Math.min(...plant));
+    const col=cssv(STATUS[p.status]||"--muted");
+    const payOrd=p.paid_in?ord.get(p.paid_in):null;
+    if(p.status==="paid"&&payOrd!=null){
+      paid++;
+      const x2=X(payOrd), span=Math.abs(x2-x1)/(W-2*PAD);
+      const h=18+(BASE-PAD-26)*Math.pow(span,0.45);
+      const a=el("path",{d:`M${x1.toFixed(1)},${BASE} C${x1.toFixed(1)},${(BASE-h).toFixed(1)} ${x2.toFixed(1)},${(BASE-h).toFixed(1)} ${x2.toFixed(1)},${BASE}`,
+        fill:"none",stroke:col,"stroke-width":(0.9+2.4*p.weight).toFixed(2),"stroke-opacity":0.9,"stroke-linecap":"round"},gArc);
+      if(p.claim_type!=="explicit") a.setAttribute("stroke-dasharray","5 3");
+      hoverable(a,p.summary,`${p.kind} · paid · weight ${p.weight} · ${p.planted_in[0]} → ${p.paid_in}`);
+    }else{
+      open++;
+      const h=5+22*p.weight;
+      const s=el("line",{x1:x1.toFixed(1),y1:BASE,x2:x1.toFixed(1),y2:(BASE-h).toFixed(1),
+        stroke:col,"stroke-width":1.1,"stroke-opacity":0.3,"stroke-linecap":"round"},gStem);
+      if(p.claim_type!=="explicit") s.setAttribute("stroke-dasharray","3 2");
+      hoverable(s,p.summary,`${p.kind} · ${p.status} · weight ${p.weight} · planted ${p.planted_in[0]}`);
+    }
+  }
+  document.getElementById("arc-legend").innerHTML=
+    `<span class="chip"><svg width="22" height="12" aria-hidden="true"><path d="M2,10 C2,1 20,1 20,10" fill="none" stroke="${cssv("--good")}" stroke-width="2"/></svg>paid — an arc that lands</span>`+
+    `<span class="chip"><svg width="14" height="14" aria-hidden="true"><line x1="7" y1="13" x2="7" y2="2" stroke="${cssv("--accent")}" stroke-width="1.5"/></svg>open — planted, still owed</span>`+
+    `<span class="chip"><span class="dot" style="background:var(--nonphoto)"></span>the 836-scene spine, by book</span>`;
+  const bk=new Map(G.scenes.map(s=>[s.scene_id,s.book_id]));
+  const paidBook={};
+  for(const p of D.promises) if(p.status==="paid"&&bk.has(p.paid_in)) paidBook[bk.get(p.paid_in)]=(paidBook[bk.get(p.paid_in)]||0)+1;
+  const top=Object.entries(paidBook).sort((a,b)=>b[1]-a[1])[0];
+  const filterNote=promises.length===D.promises.length?"No filter applied.":`${fmt(promises.length)} of ${fmt(D.promises.length)} promises pass the current filter.`;
+  document.getElementById("pro-hides").innerHTML=
+    `<span><b>${fmt(paid)} promises land; ${fmt(open)} do not.</b> Stem height is weight, so the tallest stems are what the series most owes its reader.
+     ${top?`Note the shape: plantings spread across all five books, but <b>${fmt(top[1])} of ${fmt(paid)} payoffs sit in ${esc(top[0])}</b> — that lopsidedness is the settling pass not having run on the later books, not the series resolving itself early. Read the arcs as coverage of the ledger, not as the author's craft. `:""}
+     ${unplaced?`${fmt(unplaced)} promises name no scene this export can place and are not drawn. `:""}${filterNote}</span>`;
+}
+
+/* ---------- belief matrix ---------- */
+function drawMatrix(){
+  const svg=document.getElementById("matrix"); svg.innerHTML="";
+  const B=D.beliefs;
+  const perChar=new Map(), perEvent=new Map();
+  for(const b of B){
+    const c=b.character_entity||b.character;
+    perChar.set(c,(perChar.get(c)||0)+1);
+    perEvent.set(b.event_id,(perEvent.get(b.event_id)||0)+1);
+  }
+  const chars=[...perChar.entries()].sort((a,b)=>b[1]-a[1]).slice(0,18).map(x=>x[0]);
+  const events=[...perEvent.entries()].sort((a,b)=>b[1]-a[1]).slice(0,46).map(x=>x[0]);
+  const evDay=new Map(D.events.map(e=>[e.event_id,e.day_lo]));
+  events.sort((a,b)=>(evDay.get(a)??1e9)-(evDay.get(b)??1e9));
+  const ci=new Map(chars.map((c,i)=>[c,i])), ei=new Map(events.map((e,i)=>[e,i]));
+  const cell=new Map();
+  for(const b of B){
+    const c=b.character_entity||b.character;
+    if(!ci.has(c)||!ei.has(b.event_id)) continue;
+    cell.set(ci.get(c)+"|"+ei.get(b.event_id),b);
+  }
+  const LEFT=136, TOP=20, CW=15.4, CH=19, W=900;
+  const H=TOP+chars.length*CH+40;
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  const evSummary=new Map(D.events.map(e=>[e.event_id,e.summary]));
+  const g=el("g",{},svg);
+  const disp=c=>(byId.get(c)?.name)||c;
+  chars.forEach((c,i)=>{
+    const t=el("text",{x:LEFT-8,y:TOP+i*CH+CH/2+4,"text-anchor":"end","font-family":"var(--ui)","font-size":11.5,fill:cssv("--ink2")},g);
+    const n=disp(c); t.textContent=n.length>19?n.slice(0,18)+"…":n;
+  });
+  for(let j=0;j<events.length;j++) el("rect",{x:LEFT+j*CW,y:TOP-5,width:CW-1.6,height:3,fill:cssv("--nonphoto"),rx:1},g);
+  chars.forEach((c,i)=>{
+    events.forEach((ev,j)=>{
+      const b=cell.get(i+"|"+j);
+      const x=LEFT+j*CW, y=TOP+i*CH;
+      if(!b){ el("rect",{x,y,width:CW-1.6,height:CH-2,fill:cssv("--s2"),rx:2},g); return; }
+      const r=el("rect",{x,y,width:CW-1.6,height:CH-2,rx:2,fill:cssv(BELIEF_VAR[b.state]||"--muted"),style:"cursor:pointer"},g);
+      if(b.confidence<0.7) r.setAttribute("fill-opacity",0.55);
+      hoverable(r,`${disp(c)} — ${b.state.replace("_"," ")}`,`${evSummary.get(b.event_id)||b.event_id}`.slice(0,150));
+    });
+  });
+  const lab=el("text",{x:LEFT,y:H-16,"font-family":"var(--mono)","font-size":10,fill:cssv("--muted")},g);
+  lab.textContent="events, earliest day_lo first  →";
+  document.getElementById("belief-legend").innerHTML=
+    BELIEF_ORDER.map(s=>`<span class="chip"><span class="dot" style="background:${cssv(BELIEF_VAR[s])};border:1px solid var(--line)"></span>${esc(s.replace("_"," "))}</span>`).join("")
+    +`<span class="chip"><span class="dot" style="background:var(--s2);border:1px solid var(--line)"></span>no belief recorded</span>`;
+  const states=new Map();
+  for(const b of B){ if(!states.has(b.event_id)) states.set(b.event_id,new Map()); const m=states.get(b.event_id); m.set(b.state,(m.get(b.state)||0)+1); }
+  const split=[...states.entries()].filter(([,m])=>m.size>1).sort((a,b)=>{
+    const n=m=>[...m.values()].reduce((x,y)=>x+y,0); return n(b[1])-n(a[1]);
+  }).slice(0,10);
+  document.querySelector("#split-table tbody").innerHTML=split.map(([id,m])=>
+    `<tr><td>${esc((evSummary.get(id)||id).slice(0,90))}<br><span class="mono" style="font-size:11px;color:var(--muted)">${esc(id)}</span></td>
+     <td>${[...m.entries()].sort((a,b)=>b[1]-a[1]).map(([s,n])=>`<span class="chip" style="margin-right:8px"><span class="dot" style="background:${cssv(BELIEF_VAR[s]||"--muted")};border:1px solid var(--line)"></span>${esc(s.replace("_"," "))} ${n}</span>`).join("")}</td>
+     <td class="r">${[...m.values()].reduce((x,y)=>x+y,0)}</td></tr>`).join("");
+  document.getElementById("bel-hides").innerHTML=
+    `<span><b>Showing ${chars.length} characters × ${events.length} events</b> — the busiest slice of ${fmt(B.length)} beliefs across ${fmt(perEvent.size)} events and ${fmt(perChar.size)} characters. Cells are lightened where confidence is below 0.7. Events run left to right by <code>day_lo</code>; ${fmt(D.events.filter(e=>e.day_lo==null).length)} events in the corpus carry no date at all and can never be placed on this axis.</span>`;
+}
+</script>
