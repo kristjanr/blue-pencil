@@ -176,15 +176,49 @@ ul.tight li{margin-bottom:6px;color:var(--ink2);font-size:14px}
 </header>
 
 <nav class="tabs" role="tablist" aria-label="Views">
-  <button class="tab" role="tab" id="tab-coverage" aria-selected="true" aria-controls="v-coverage">Coverage</button>
+  <button class="tab" role="tab" id="tab-dupes" aria-selected="true" aria-controls="v-dupes">Duplicates</button>
+  <button class="tab" role="tab" id="tab-coverage" aria-selected="false" aria-controls="v-coverage">Coverage</button>
   <button class="tab" role="tab" id="tab-entities" aria-selected="false" aria-controls="v-entities">Entity graph</button>
   <button class="tab" role="tab" id="tab-lineage" aria-selected="false" aria-controls="v-lineage">Lineage</button>
   <button class="tab" role="tab" id="tab-promises" aria-selected="false" aria-controls="v-promises">Promise ledger</button>
   <button class="tab" role="tab" id="tab-beliefs" aria-selected="false" aria-controls="v-beliefs">Belief matrix</button>
 </nav>
 
+<!-- DUPLICATES -->
+<section class="view" id="v-dupes" role="tabpanel" aria-labelledby="tab-dupes">
+  <div class="viewhead">
+    <h2>One character, recorded more than once</h2>
+    <p>The defect that costs the most downstream. <code>knowledge.last_placement()</code> matches a scene's cast against one canonical name, so a character split across two records is invisible in half the scenes he appears in — and the geography checker then reports a stale position with full confidence. Noise is survivable; a false alarm with a straight face is not.</p>
+  </div>
+  <div class="tiles" id="dupe-tiles"></div>
+  <div class="hides" id="dupe-caveat"></div>
+  <div class="grid2" style="margin-top:16px">
+    <div class="panel">
+      <h3>Groups by kind</h3>
+      <div id="dupe-kind-bars" style="margin-top:12px"></div>
+      <p style="font-size:12.5px;color:var(--muted);margin:12px 0 0">Characters are the costly ones — a split faction or place does not move through scenes, so it cannot strand the geography checker.</p>
+    </div>
+    <div class="panel">
+      <h3>How far adjudication got</h3>
+      <div id="dupe-verdict-bars" style="margin-top:12px"></div>
+      <p style="font-size:12.5px;color:var(--muted);margin:12px 0 0" id="dupe-verdict-note"></p>
+    </div>
+  </div>
+  <div class="controls" style="margin-top:20px">
+    <input type="search" id="dq" placeholder="search a name or id…" aria-label="Search groups">
+    <select id="dkind" aria-label="Filter by kind"><option value="">all kinds</option><option value="character">characters only</option></select>
+    <select id="dverdict" aria-label="Filter by verdict">
+      <option value="">any verdict</option><option value="none">not yet adjudicated</option>
+      <option value="hold">held for you</option><option value="merge">ruled merge</option>
+      <option value="partition">ruled partition</option><option value="split">ruled split</option>
+    </select>
+    <select id="dsort" aria-label="Sort"><option value="cast">by cast impact</option><option value="size">by group size</option></select>
+  </div>
+  <div id="dupe-list"></div>
+</section>
+
 <!-- COVERAGE -->
-<section class="view" id="v-coverage" role="tabpanel" aria-labelledby="tab-coverage">
+<section class="view" id="v-coverage" role="tabpanel" aria-labelledby="tab-coverage" hidden>
   <div class="viewhead">
     <h2>What the extractor actually caught</h2>
     <p>The counts first, then the two residues that decide how much to trust a drawn edge: references that resolved to nothing, and names that several entities share.</p>
@@ -304,7 +338,7 @@ ul.tight li{margin-bottom:6px;color:var(--ink2);font-size:14px}
 <div class="tip" id="tip" role="status" aria-live="polite"></div>
 
 <script>
-const GRAPH_URL = "graph.json", DETAIL_URL = "detail.json";
+const GRAPH_URL = "graph.json", DETAIL_URL = "detail.json", DUPES_URL = "duplicates.json";
 const KIND_ORDER = ["character","place","faction","ship","organisation","other"];
 const KIND_VAR = {character:"--k1",place:"--k2",faction:"--k3",ship:"--k4",organisation:"--k5",other:"--k6"};
 const BELIEF_ORDER = ["knows","suspects","unaware","believes_false","misinformed"];
@@ -315,7 +349,7 @@ const fmt = n => Number(n).toLocaleString();
 const SVGNS = "http://www.w3.org/2000/svg";
 function el(tag,attrs,parent){const n=document.createElementNS(SVGNS,tag);for(const k in attrs)n.setAttribute(k,attrs[k]);if(parent)parent.appendChild(n);return n;}
 
-let G=null, D=null, byId=new Map(), adj=new Map(), selected=null, ambiguousIds=new Set();
+let G=null, D=null, DUP=null, byId=new Map(), adj=new Map(), selected=null, ambiguousIds=new Set();
 
 /* ---------- tooltip ---------- */
 const tipEl=document.getElementById("tip");
@@ -329,7 +363,7 @@ function hoverable(node,title,meta){
 }
 
 /* ---------- tabs ---------- */
-const VIEWS=["coverage","entities","lineage","promises","beliefs"];
+const VIEWS=["dupes","coverage","entities","lineage","promises","beliefs"];
 let drawn={};
 function selectTab(name){
   for(const v of VIEWS){
@@ -371,11 +405,89 @@ function boot(){
   for(const cands of Object.values(G.data_quality.ambiguous_names||{})) for(const c of cands) ambiguousIds.add(c);
   drawCoverage();
   buildEntityList();
-  let start="coverage";
+  fetch(DUPES_URL).then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
+    .then(d=>{DUP=d;drawDupes();})
+    .catch(e=>{document.getElementById("dupe-list").innerHTML=
+      `<div class="status">duplicates.json not available (${esc(e.message)}) — regenerate it with <span class="mono">python3 viz/make_duplicates.py viz/graph.json &gt; viz/duplicates.json</span></div>`;});
+  let start="dupes";
   try{const s=localStorage.getItem("bp-viz-tab");if(s&&VIEWS.includes(s))start=s;}catch(e){}
   selectTab(start);
 }
 const deg = id => (adj.get(id)||[]).length;
+
+/* ---------- duplicates ---------- */
+const VERDICT_VAR={hold:"--warning",merge:"--good",split:"--accent",partition:"--serious",none:"--muted"};
+const VERDICT_LABEL={hold:"held for you",merge:"ruled merge",split:"ruled split",
+  partition:"ruled partition",none:"not adjudicated"};
+
+function drawDupes(){
+  const c=DUP.counts, pct=(c.cast_entries_affected/Math.max(c.cast_entries_total,1)*100);
+  const chars=c.groups_by_kind.character||0;
+  const none=c.groups_by_verdict.none||0;
+  document.getElementById("dupe-tiles").innerHTML=[
+    [fmt(c.groups),"candidate groups",`${fmt(c.records)} records, out of ${fmt(c.entities)}`],
+    [chars,"of them characters",`the kind that strands a checker`],
+    [pct.toFixed(1)+"%","of scene-cast entries",`${fmt(c.cast_entries_affected)} of ${fmt(c.cast_entries_total)} name a record in a group`],
+    [fmt(none),"never adjudicated",`${fmt(c.groups-none)} carry a recorded verdict`],
+    [fmt(c.merges_applied),"merges already applied",`redirects kept in entity_merges`],
+  ].map(([v,l,n])=>`<div class="tile"><div class="v">${v}</div><div class="l">${l}</div><div class="n">${n}</div></div>`).join("");
+
+  document.getElementById("dupe-caveat").innerHTML=
+    `<span><b>A group is a question, not a bug.</b> ${esc(DUP.source.caveat||"")} Here, ${esc(DUP.source.rule||"")}. Seven <span class="mono">Survey Drone</span> records really are several drones, and the six <span class="mono">Guppy</span> records are one GUPPI instance per replicant — <em>same type, different instance</em>, which the schema cannot currently express at all, so it keeps arriving here as a merge question that has no right answer.</span>`;
+
+  const kinds=Object.entries(c.groups_by_kind).sort((a,b)=>b[1]-a[1]);
+  bars(document.getElementById("dupe-kind-bars"),kinds,k=>cssv(KIND_VAR[k]||"--muted"));
+  const vorder=["none","hold","partition","merge","split"];
+  bars(document.getElementById("dupe-verdict-bars"),
+    vorder.filter(v=>c.groups_by_verdict[v]).map(v=>[VERDICT_LABEL[v],c.groups_by_verdict[v]]),
+    l=>cssv(VERDICT_VAR[Object.keys(VERDICT_LABEL).find(k=>VERDICT_LABEL[k]===l)]||"--muted"));
+  document.getElementById("dupe-verdict-note").textContent=
+    `Verdicts come from ${DUP.source.verdicts_from||"the eval file"}, which covered an earlier round of ${fmt(c.groups-none)} groups. The rule has since surfaced ${fmt(none)} more that nobody has ruled on.`;
+
+  for(const id of ["dq","dkind","dverdict","dsort"])
+    document.getElementById(id).addEventListener("input",renderDupes);
+  renderDupes();
+}
+
+function renderDupes(){
+  const q=document.getElementById("dq").value.trim().toLowerCase();
+  const kind=document.getElementById("dkind").value;
+  const verdict=document.getElementById("dverdict").value;
+  const sort=document.getElementById("dsort").value;
+  let list=DUP.groups.filter(g=>{
+    if(kind&&g.dominant_kind!==kind) return false;
+    if(verdict&&(g.verdict||"none")!==verdict) return false;
+    if(!q) return true;
+    return g.members.some(m=>m.name.toLowerCase().includes(q)||m.entity_id.toLowerCase().includes(q)
+      ||(m.aliases||[]).some(a=>String(a).toLowerCase().includes(q)));
+  });
+  list=list.slice().sort(sort==="size"
+    ? (a,b)=>b.members.length-a.members.length||b.cast_entries-a.cast_entries
+    : (a,b)=>b.cast_entries-a.cast_entries||b.members.length-a.members.length);
+  const shown=list.slice(0,60);
+  document.getElementById("dupe-list").innerHTML=
+    `<div class="eyebrow" style="margin:4px 0 10px">${fmt(list.length)} group${list.length===1?"":"s"}${list.length>shown.length?` · showing the first ${shown.length}`:""}</div>`
+    + (shown.map(g=>{
+      const v=g.verdict||"none";
+      return `<div class="dgroup">
+        <div class="top">
+          <span class="vbadge ${v}">${esc(VERDICT_LABEL[v])}</span>
+          ${shapeChip(g.dominant_kind)}<span style="font-size:13px;color:var(--muted)">${esc(g.dominant_kind)}</span>
+          <span class="impact">${fmt(g.members.length)} records · named in ${fmt(g.cast_entries)} cast entries</span>
+          <span class="rs">${g.reasons.map(r=>`<span class="rchip">${esc(r)}</span>`).join("")}</span>
+        </div>
+        ${g.members.map(m=>{
+          const badge=m.claim_type==="inferred"?'<span class="flag inf">inf</span>'
+            :m.claim_type==="disputed"?'<span class="flag dis">dis</span>':"";
+          return `<div class="dmember">
+            <div><span class="nm">${esc(m.name)}</span>${badge}
+              <span class="id">${esc(m.entity_id)}${(m.aliases||[]).length?" · aka "+m.aliases.map(esc).join(", "):""}</span></div>
+            <div class="stat">${fmt(m.cast_entries)} cast · ${fmt(m.edges)} edges${m.status&&m.status!=="unknown"?` · ${esc(m.status)}`:""}</div>
+            ${m.description?`<div class="desc">${esc(m.description)}</div>`:""}
+          </div>`;}).join("")}
+        ${g.verdict_note?`<div class="vnote"><b>${v==="hold"?"Open question":"Recorded reasoning"}${g.verdict_group?` (group ${esc(g.verdict_group)})`:""}:</b> ${esc(g.verdict_note)}</div>`:""}
+      </div>`;}).join("") || `<div class="status">nothing matches these filters</div>`);
+}
 
 /* ---------- coverage ---------- */
 function bars(node,rows,colorFn){

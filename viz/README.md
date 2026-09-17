@@ -5,15 +5,24 @@ Two viewers over one graph. The split is not a preference — it falls exactly a
 
 ## `index.html` — the atlas (shareable, no database)
 
-Five views: entity network, replicant lineage, promise ledger, belief matrix, and a
-coverage dashboard that leads with what the extractor *missed*. One HTML file, no build
+Six views, opening on **Duplicates** — one character recorded as several entities, the
+defect that costs the most downstream. Then entity network, replicant lineage, promise
+ledger, belief matrix, and a coverage dashboard that leads with what the extractor
+*missed*. One HTML file, no build
 step, no libraries. Everything it draws comes from the two files `bp export` writes,
 fetched at runtime:
 
 ```
 bp export --profile bobiverse --out ./viz
+python3 viz/make_duplicates.py viz/graph.json > viz/duplicates.json
 python3 -m http.server -d viz 8901     # then open http://127.0.0.1:8901
 ```
+
+`make_duplicates.py` calls `bp.resolve.candidates` — the same function `bp resolve` uses —
+against the exported entities, rather than reimplementing the matching rule in JavaScript
+where it would drift. It overlays the recorded verdicts from
+`eval/entity_duplicate_verdicts.yaml` and the merges already applied. **This belongs in
+`bp export` eventually**; it lives here because the export does not emit it yet.
 
 `graph.json` and `detail.json` are deliberately not committed — 12 MB of derived data with
 a source of truth one command away, and `.gitignore` keeps them out.
