@@ -1,36 +1,45 @@
 # A GUI for looking at the graph
 
-You asked for a GUI to view "the relationships the extract phase builds". Two things
-found while reading the schema change the shape of the answer, so they come first.
+You asked for a GUI to view "the relationships the extract phase builds". Four findings
+change the shape of the answer, so they come first. Two came from reading the schema; two
+came from reconciling it against `bp/export.py` (master, `c9ceb43`), which the engine
+session published while this was being written and which is the contract this plan builds
+against.
 
 ---
 
 ## Finding 1 — the `relationships` table is dead
 
 `db.py` declares it, `models.py:166` declares the `Relationship` model, `db.py:687`
-declares `write_relationship()`. Nothing calls it. Not `extract.py`, not `accept.py`,
-not `resolve.py` — the only hits across the whole tree are the definitions themselves.
+declares `write_relationship()`. Nothing calls it. The only hits across the whole tree
+are the definitions themselves, so the table has always held zero rows and `bp graph
+stats` has always printed `relationships 0` without anyone reading it as a defect.
 
-So the table has always held zero rows, and `bp graph stats` has always printed
-`relationships 0` without anyone reading it as a defect. A GUI pointed at that table
-would render an empty canvas and look like it was working — the exact failure `db.py`
-warns about in its own comment about creating graphs on demand: *"an empty graph answers
-every question plausibly and wrongly."*
+**Resolved, better than the two options first offered here.** The engine session settled
+it while this was being written: keep the table, derive every edge from the columns that
+do hold relational data, and have the derivation record *how* each kind was built in an
+`edge_kinds` block — so a viewer can show provenance rather than assert a fact the
+database never stated. `declared` is wired up for the day something writes the table. The
+original delete-or-populate framing was a false binary; this is the third answer.
 
-This is worth deciding deliberately, and it is a separate decision from the GUI:
+Derived edge kinds, against the live graph:
 
-- **Delete it**, and treat relations as derived (what this plan assumes), or
-- **Populate it** — add a relationship pass to extraction, at real token cost, to get
-  edges the text states but no other table records: *owes a debt to*, *swore an oath to*,
-  *suspects*. Those are not recoverable by derivation.
+| kind | from | directed | edges |
+|---|---|---|---|
+| `observed` | `events.observed_by` → `events.participants` | yes | 2,016 |
+| `co_participant` | two entities in one `events.participants` | no | 1,466 |
+| `shares_thread` | two entities in one `threads.characters` | no | 1,381 |
+| `forked_from` | `entities.parent_id` | yes | 90 |
+| `declared` | `relationships` | — | 0 |
 
-The GUI does not need this resolved to be built. It does need it resolved before anyone
-concludes from the GUI that two characters are unrelated.
+Edges are aggregated, not repeated: a pair appearing in forty events is one edge with
+`count: 40` plus up to eight `via` ids. Weight drives stroke width; it is not forty lines.
+The heaviest edge in the corpus is Garfield—Bill at 421.
 
 ## Finding 2 — the real relations have six shapes
 
-The extract phase does build a great deal of relational structure. It is just spread
-across tables, mostly as JSON arrays:
+Unchanged, and the export confirms it. The structure extract builds is spread across
+tables, mostly as JSON arrays:
 
 | Relation | Where it lives | Its natural shape |
 |---|---|---|
@@ -38,83 +47,121 @@ across tables, mostly as JSON arrays:
 | Provenance | `citations(record_kind, record_id, scene_id, quote)` | many-to-many overlay on the spine |
 | Clone lineage | `entities.parent_id`, `forked_on`, `fork_day` | **forest on a time axis** |
 | Co-participation | `events.participants`, `observed_by` | **weighted force graph** |
-| Causation | `event_edges(src, dst, 'causes')` | **layered DAG** |
-| Information flow | `events` → `reports(sender, recipient, channel, depart_day, arrive_day)` | **temporal path / sequence** |
-| Epistemic state | `beliefs(character, event_id, state, as_of_day)` | **matrix, not a graph** |
-| Setup and payoff | `promises.planted_in` → `paid_in` | **arc diagram over the scene spine** |
-| Custody | `objects.holder`, `location`, `as_of_day` | **per-object timeline** |
-| Plot state | `threads.characters`, `last_scene`, `status` | braid / storyline |
-| Resolution history | `entity_merges`, `record_changes` | audit list |
+| Causation | `event_edges(src, dst, 'causes')` — 2,383 rows | **layered DAG** |
+| Information flow | `reports(sender, recipient, channel, depart_day, arrive_day)` | **temporal path / sequence** |
+| Epistemic state | `beliefs` — 8,154 rows | **matrix, not a graph** |
+| Setup and payoff | `promises.planted_in` → `paid_in` — 2,886 | **arc diagram over the scene spine** |
+| Custody | `objects.holder`, `location`, `as_of_day` — 881 | **per-object timeline** |
+| Plot state | `threads.characters`, `last_scene` — 1,967 | braid / storyline |
+| Resolution history | `entity_merges` (42), `record_changes` | audit list |
 | Irreconcilable readings | `contradictions.cites_a` / `cites_b` | side-by-side pairs |
 
-Four of these are genuinely not graphs. Beliefs are a matrix. Promises are arcs over a
-line. Object custody is a timeline. Contradictions are pairs. Drawing them as node-link
-diagrams would actively hide what they say.
+Four of these are not graphs. Beliefs are a matrix, promises are arcs over a line, custody
+is a timeline, contradictions are pairs. Node-link diagrams would hide what they say.
 
----
+## Finding 3 — the ambiguous join, now measured
 
-## Finding 3 — the join is ambiguous, and that is the most valuable thing to show
+The suspicion recorded in the first draft of this plan was right, and the export quantifies
+it. `events.participants` holds entity ids, display names and aliases interchangeably —
+`"bob-3-bill"`, `"Garfield"` and `"Enoki"` can sit in one array — because `accept.py:175`
+writes canonical names, `extract.py:602` rewrites the same column as ids, and
+`profile.canonical()` falls back to the input unchanged so a mismatch resolves to itself
+and matches nothing. `tests/fixtures/synthetic.py:186` sets `entity_id == name`, so the
+fixture cannot catch it.
 
-To draw an edge from an event to an entity you must join `events.participants` against
-`entities`. The codebase does not agree on what is in that array.
+Against the real graph:
 
-- `accept.py:175` writes `profile.canonical(c)` — canonical **names**.
-- `knowledge.py:115` reads it through `_canon()` — treating entries as **names** to
-  alias-resolve.
-- `extract.py:602` rewrites entries matching `"{old_id}"` during a merge — treating
-  entries as **entity ids**.
-- `tests/fixtures/synthetic.py:186` sets `entity_id=eid, name=eid`, making id and name
-  identical — so the fixture cannot catch the disagreement.
+- **2,551 mentions resolve to nothing**, across 1,174 distinct strings. Some are real
+  characters never extracted (`Steven Gilligan`, `Will Riker`); some are collective nouns
+  that should never be nodes (`moot attendees`, `the Others`).
+- **17 names are shared by several entities** — six Guppys, three Alexanders — covering
+  1,492 mentions, tie-broken to the most-cited candidate with every rejected candidate
+  kept in `data_quality.ambiguous_names`.
+- **1,587 of 2,095 entities have no edge at all** — mostly places, factions and ships
+  named in prose but never in an event cast. That is real extraction coverage, not an
+  export artifact.
 
-`profile.canonical()` falls back to `name.strip()` for anything it does not recognise,
-so a mismatched entry does not raise; it silently resolves to itself and matches nothing.
-`CastRebuild.render()` already has a line for `"participants naming no known entity
-(dropped)"`, which says this was seen before.
+The resolver's tier order — exact id, unique name, unique alias, then most-cited wins —
+earns its keep on one case: `Bob-1` is both the first replicant's name and an alias of a
+different POV entity, and refusing to resolve ambiguous names discarded **7,630 mentions
+of the most-referenced character in the series**. A visible, overridable tie-break beats
+losing a third of the graph quietly. The viewer's job is to keep it visible: mark edges
+whose endpoint came from that table, and show `scenes[].cast_raw` beside the resolved
+`cast` so the reader sees what the text said as well as what it matched to.
 
-This is the same class of defect as the bootstrap-cast bug recorded in `extract.py`: a
-join that silently loses rows, feeding a checker that then reasons confidently from less
-data than it appears to have. **A viewer that drops unjoinable participants would inherit
-the bug and make it invisible.** So the viewer counts them and shows them instead — which
-is the argument for building this at all beyond pleasure: it is an instrument, not a
-picture.
+## Finding 4 — what the export cannot answer, and why it matters
 
----
+Verified twice: against the two published JSON files, and against `bp/export.py` itself,
+which reads eleven tables and names neither of the first two below.
+`detail.json` carries `events` (6,229), `event_edges` (2,383), `beliefs` (8,154),
+`promises` (2,886) and `citations` (16,390). Three things are absent:
+
+- **`reports` is not exported at all.** Those are the hops — sender, recipient, channel,
+  `depart_day`, `arrive_day`. Beliefs are the *outcome* of information travelling;
+  reports are the *route*. Without them the information-path view cannot be built from
+  the export, and it is the most valuable view in this plan.
+- **`contradictions` is in neither file.** Currently 0 open, so nothing is lost today,
+  but the view has no data source.
+- **No citation quotes and no scene prose**, deliberately. So the provenance drill-down —
+  the record-versus-quote check `docs/record-types.md` calls Question 1 — cannot run off
+  the export by design.
+
+This is not a complaint about the export; it is what decides the architecture below.
 
 ## What to build
 
-A **local, read-only web app**: a stdlib HTTP server over the SQLite file, serving JSON
-to a vanilla-JS frontend. Six views, because there are six shapes.
+Findings 3 and 4 draw the line for us. The viewer splits into two tiers, and the split is
+not a preference — it falls exactly along *does this need book text or the epistemic
+engine?*
 
-### Why this architecture
+**Tier A — static, shareable, no database.** Entity graph, lineage, promise arcs, causal
+DAG, belief matrix, coverage. Everything here is answerable from `graph.json` and
+`detail.json`. It needs no server, no SQLite and no API key, so it can be published and
+handed to someone the way the engine session's own handover page already was.
 
-**Why read-only, physically.** `STATUS.md` says to run `backup.sh` before anything that
-mutates the graph. A viewer that opens the database with a `file:...?mode=ro` URI *cannot*
-mutate it — no discipline required, no backup ritual, and safe to leave open while an
-extraction is writing, since WAL permits concurrent readers. The guarantee comes from the
-connection string, not from being careful.
+**Tier B — local only, needs the database.** The information path (needs `reports`, which
+the export omits, and `KnowledgeGraph.earliest_knowledge()`, which is real Python) and the
+provenance drill-down (needs scene prose and citation quotes, excluded by design). These
+stay behind `bp viz serve` on the machine that holds `graph/bobiverse.sqlite`.
 
-**Why a server rather than a static HTML export.** `review.py` already sets a precedent for
-self-contained HTML, and for most views an export would do. But the highest-value view
-renders `KnowledgeGraph.earliest_knowledge()` — a real piece of Python reasoning over
-light-lag, channel availability windows and clone-fork inheritance. Reimplementing that in
-JS would mean two copies of the epistemic rules that could disagree, which is precisely the
-kind of drift the checkers exist to catch. The view must call the real function. A static
-snapshot export is worth adding later for sharing, but it cannot be the primary form.
+### Why this shape
 
-**Why no new dependencies for the backend.** `http.server` plus `sqlite3` plus `json` is
-enough. The project currently has five dependencies and a house style of not adding magic.
+**Why build Tier A against the exported JSON rather than the database.** Not because the
+database is awkward, but because the export is a *contract*. `edge_kinds`, `data_quality`
+and `source` are a documented shape that a re-export drops straight into; anything built
+against columns incidental to one snapshot breaks the next time extraction runs. It also
+means the viewer runs where the corpus is not — no book text is in either file, so Tier A
+can be shared without shipping five novels.
 
-**Frontend drawing — one decision to make.** The layouts needed are a force simulation, a
-time-anchored tree, an arc diagram, a matrix and a layered DAG. Hand-rolled SVG is perhaps
-400 lines and no dependency; vendoring `d3` v7 (~280KB, committed to `bp/viz/static/`) is
-zero lines and works offline but is a large binary-ish blob in git. **Recommendation:
-vendor d3.** The arc, matrix and tree views are trivial without it, but a hand-rolled force
-simulation that behaves well at 2,000 nodes is a genuine time sink for no benefit.
+**Why Tier B cannot be folded in.** The information path is light-lag arithmetic, channel
+availability windows and clone-fork inheritance. Reimplementing it in JS would mean two
+copies of the epistemic rules that can silently disagree — the exact drift the checkers
+exist to catch. The view must call the real function, so it must have Python and the
+database. That is a boundary, not an inconvenience.
 
-**Scale.** The real graph is 836 scenes, 2,137 entities, 6,229 events, 16,393 citations,
-2,886 promises. That is small for SQLite and too large for any single canvas. Every view
-is therefore filtered by default — top-N by degree, or scoped to one book, one entity, one
-thread — and says what it is hiding. A view that silently truncates is worse than no view.
+**Read-only, physically.** `STATUS.md` says to run `backup.sh` before anything that mutates
+the graph. Tier B opens the database with a `file:...?mode=ro` URI, so it *cannot* mutate
+it — no discipline required, and safe to leave open while an extraction is writing, since
+WAL permits concurrent readers. The guarantee comes from the connection string, not from
+being careful. Tier A cannot write anything at all.
+
+**Scale, and the honesty rule.** 2,095 entities, 4,953 edges, 6,229 events, 2,886
+promises. Small for a machine, far too large for one canvas. Every view filters by
+default — top-N by weight, or scoped to a book, an entity, a thread — and **states what it
+is hiding**. Specifically: the 1,587 entities with no edge get an explicit "mentioned
+only" shelf rather than being dropped, because a graph that silently omits three quarters
+of its nodes is a graph that lies about coverage.
+
+**Drawing claims differently.** Every record carries `claim_type` (`explicit` = the text
+said it, `inferred` = the model concluded it) and `confidence`. These are different claims
+and must not render identically — inferred edges dashed, low confidence lighter. Likewise
+events carry `day_lo`/`day_hi`, not a date: any timeline draws the **span**, never a point.
+An edge whose endpoint came from `ambiguous_names` gets marked too.
+
+**Frontend drawing — one decision to make.** Hand-rolled SVG is perhaps 400 lines and no
+dependency; vendoring `d3` v7 (~280KB) is zero lines and works offline. **Recommendation:
+vendor d3.** Arc, matrix and tree views are trivial without it, but a force simulation
+that behaves well at 2,000 nodes is a genuine time sink for no benefit.
 
 ### The views
 
@@ -169,34 +216,51 @@ braids (1,967 threads needs a severe filter to mean anything).
 
 ## Phasing
 
-Each phase is independently useful; none is a prerequisite for shipping the one before it.
+Phase 0 of the first draft — build a read-only query layer and a join audit — is **done
+and should not be rebuilt.** `bp/export.py` is that layer, and `data_quality` is that
+audit. What remains is the drawing, and one repair.
 
-**Phase 0 — `bp/viz/query.py`, no UI.** Read-only query layer plus the integrity and join
-audit, exposed as `bp viz audit`. Delivers Finding 3 as real numbers against the real
-graph. This is the phase that might change what the rest should be, so it goes first.
+**Phase 1 — Tier A shell, View 0 and View 1.** Coverage dashboard and the entity graph,
+off `graph.json` alone. This is the shortest path to something worth looking at, and it
+needs nothing that does not already exist.
 
-**Phase 1 — server, shell, View 0 and View 5.** `bp viz serve --port 8900`, binding
-`127.0.0.1` only. The spine and the dashboard.
+**Phase 2 — Views 2 and 4.** Lineage forest and the promise arc diagram. `forked_from` is
+only 90 edges, so the lineage view is exact, cheap and immediately legible — the best
+value-per-line in the plan.
 
-**Phase 2 — Views 1 and 2.** Entity graph and lineage.
+**Phase 3 — View 6 and the causal DAG,** off `detail.json`. Belief matrix and the 2,383
+causal edges.
 
-**Phase 3 — View 3.** Information path, on top of the Phase 1 spine.
+**Phase 4 — Tier B: `bp viz serve`,** the information path and the provenance drill-down.
+Blocked on the export gap below, or on running against the database directly.
 
-**Phase 4 — Views 4 and 6.** Promise arcs, belief matrix, contradictions.
+### The one repair this plan asks for
+
+`reports` needs adding to `detail.json` — `event_id`, `sender`, `recipient`, `channel`,
+`depart_day`, `arrive_day`, `computed`, `status`. Recipients and senders are entity
+references, so they want the same `Resolver` pass every other reference gets. It carries no book text, so it does not
+touch the no-corpus-text guard. `contradictions` is worth adding at the same time
+(`cites_a`/`cites_b` are scene ids, not quotes). With reports present, the information
+path moves out of Tier B and becomes shareable like everything else — which is the single
+highest-value change available to either side of this work.
 
 ## Testing
 
-The synthetic fixture in `tests/fixtures/synthetic.py` is the development corpus: a world
-whose every distance and information path is known exactly, so a wrong edge is provably
-wrong rather than arguably wrong. Note that it sets `entity_id == name`, so it must be
-extended with an entity whose id and name differ before it can test the Finding 3 join at
-all. Query-layer tests assert edge counts against hand-computed expectations; the server
-gets a smoke test per endpoint; no browser automation.
+`tests/fixtures/synthetic.py` remains the development corpus: a world whose every distance
+and information path is known exactly, so a wrong edge is provably wrong rather than
+arguably wrong. It sets `entity_id == name` and so must be extended with an entity whose
+id and name differ before it can test the Finding 3 join at all. Tier A additionally gets
+a fixture cut from the real export — a few hundred entities — so view tests run fast
+without carrying 11.6 MB into the repo.
 
 ## Open questions for you
 
-1. **`relationships`** — delete the dead table, or build the extraction pass that fills it?
+1. ~~Delete or populate `relationships`?~~ **Answered** — derive, keep the table, record
+   provenance per edge kind. See Finding 1.
 2. **d3 vendored, or hand-rolled SVG?** Recommendation above is to vendor.
-3. **Which view do you actually want first?** This plan orders by dependency, not by your
-   need. If the information path (View 3) is what you want to look at, Phase 1 can be cut
-   to the minimum that supports it.
+3. **Which view first?** The phasing orders by dependency, not by need. If the information
+   path is what you actually want to look at, that reorders everything and needs the
+   export repair first.
+4. **Where should Tier A live** — a published page like the engine session's handover, or
+   a file in this repo served locally? The first is shareable; the second is version
+   controlled. They are not exclusive.
