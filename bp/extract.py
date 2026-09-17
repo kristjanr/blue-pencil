@@ -96,6 +96,13 @@ class ExtractReport:
     rejected_uncited: int = 0
     citations_repinned: int = 0
     planted_repinned: int = 0
+    #: Promises the extractor handed back already closed. 41 of them reached
+    #: the ledger before anyone looked: no settling run, no trail, and 40 of
+    #: the 41 "paid" in their own planting scene. A promise born paid never
+    #: enters a candidate listing, is never offered to a later scene, and is
+    #: counted as neither open nor closable — it leaves the ledger silently,
+    #: which is this project's recurring bug wearing a new hat.
+    promises_born_paid: int = 0
     fields_dropped: int = 0
     records_salvaged: int = 0
     unwrapped_json: int = 0
@@ -116,6 +123,8 @@ class ExtractReport:
             f"records rejected for having no citation: {self.rejected_uncited}",
             f"citations re-pinned to the scene they came from: {self.citations_repinned}",
             f"promise plants re-pinned: {self.planted_repinned}",
+            f"promises reopened because extraction returned them paid: "
+            f"{self.promises_born_paid}",
             f"salvaged: {self.fields_dropped} unknown fields dropped, "
             f"{self.records_salvaged} records with an out-of-vocabulary value, "
             f"{self.unwrapped_json} string-wrapped arrays parsed",
@@ -223,6 +232,21 @@ def _write_records(graph: Graph, scene_id: str, pass_name: str, payload: Any, re
             if pinned != list(p.planted_in):
                 report.planted_repinned += 1
             p.planted_in = pinned or [scene_id]
+            # Extraction reads one scene and may not close a promise. Settling
+            # is the only thing that may, and it has to show a quote from the
+            # paying scene to do it; nothing here can produce that evidence, so
+            # a closed promise arriving from extraction is a defect by
+            # construction rather than a judgement call about the prose.
+            #
+            # Reopened rather than dropped: of the 41 found in the ledger, 15
+            # were real open debts ("pending confirmation via drone
+            # surveillance", "she will be uploaded") that had silently left it.
+            # About half the rest are not promises at all, and those are better
+            # as visible noise a settling pass declines to close than as
+            # invisible closes nobody can audit.
+            if p.status != "open":
+                p.status, p.paid_in, p.paid_quote = "open", "", ""
+                report.promises_born_paid += 1
             graph.write_promise(p)
             report.promises += 1
         for t in payload.threads:

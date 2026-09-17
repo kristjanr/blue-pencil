@@ -420,6 +420,21 @@ class SettleReport:
     #: tell the two apart; this makes the next one able to.
     output_by_candidates: list[tuple[int, int]] = field(default_factory=list)
 
+    def double_closed(self) -> list[tuple[str, list[str]]]:
+        """Promises that more than one scene claimed to pay off.
+
+        Empty for a live run by construction — it drops a promise from every
+        later listing as soon as something closes it — and so this is also the
+        price of not doing that: each entry is a promise that stayed in the
+        listing of every scene after its payoff, at 64.82 billed input tokens
+        per scene per promise. The batch path pays that and gets ambiguity back.
+        """
+        by_promise: dict[str, list[str]] = {}
+        for sid, pid, *_rest in self.closes:
+            by_promise.setdefault(pid, []).append(sid)
+        return sorted((p, sorted(set(s))) for p, s in by_promise.items()
+                      if len(set(s)) > 1)
+
     def output_scaling(self) -> str:
         """Does output grow with the candidate list, or is it flat per call?"""
         pts = [p for p in self.output_by_candidates if p[0] > 0]
@@ -481,6 +496,7 @@ class SettleReport:
             "rejected_unknown": [{"scene": s, "promise_id": p} for s, p in self.rejected_unknown],
             "echoed": self.echoed,
             "unechoed": self.unechoed,
+            "double_closed": [{"promise_id": p, "scenes": s} for p, s in self.double_closed()],
             "errors": self.errors,
         }
 
@@ -490,6 +506,10 @@ class SettleReport:
             f"closes rejected because the quote is not in the scene: {len(self.rejected_quote)}",
             f"closes naming a promise that was not a candidate: {len(self.rejected_unknown)}",
         ]
+        if (dup := self.double_closed()):
+            lines.append(
+                f"{len(dup)} promise(s) closed by more than one scene; the earliest was kept "
+                f"(e.g. {dup[0][0]} in {', '.join(dup[0][1][:3])})")
         if (cal := self.calibration()):
             lines.append(cal)
         if (scale := self.output_scaling()):
@@ -499,11 +519,10 @@ class SettleReport:
         # text tells them apart.
         for sid, pid, quote in self.rejected_quote[:5]:
             lines.append(f"  REJECTED {sid} <- {pid}: {quote[:100]!r}")
-        if self.closes:
+        if (total := self.echoed + self.unechoed):
             # work-ed's check: if it only ever closes promises whose own words
             # are echoed in the scene, it is doing string matching in an
             # expensive costume rather than reading.
-            total = self.echoed + self.unechoed
             lines.append(
                 f"of the closes, {self.unechoed} ({self.unechoed / total:.0%}) were on scenes that do "
                 f"NOT echo the promise's own distinctive words")
@@ -515,20 +534,44 @@ class SettleReport:
         return "\n".join(lines)
 
 
+def _scene_ord(graph, scene_id: str) -> int | None:
+    row = graph.conn.execute("SELECT ord FROM scenes WHERE scene_id=?",
+                             (scene_id,)).fetchone()
+    return None if row is None else row["ord"]
+
+
 def _close(graph, promise_id: str, scene_id: str, run_id: str, confidence: float,
-           quote: str = "") -> None:
+           quote: str = "") -> str:
     """Mark a promise paid, leaving behind what it was and which run did it.
 
     Closing overwrites `status` and `paid_in` on a record that was open, and we
     will correct this settler's prompt at least once. Without the trail there is
     no way to ask "which closes came from the run before the fix" — the same
     hole that made 156 wrong demotions an archaeology exercise.
+
+    Returns the scene that already held the close, or "" if this one was
+    written. The earliest payoff is the right one, and only the live path gets
+    that for free: it walks in reading order and drops a promise from every
+    later listing the moment something closes it, so it never sees the second
+    answer. A batch is offered every scene at once and returns them in whatever
+    order it likes — `poll_batch` guarantees none — so two scenes can both close
+    one promise and the record ends up naming an arbitrary one of them. Nothing
+    in the run looks wrong afterwards: both closes carry a verified quote.
+
+    Hence: never overwrite a close this one cannot be shown to beat. If either
+    scene has no `ord` the comparison cannot be made, so the incumbent stands.
+    Re-running the live path over settled scenes hits the same guard, which it
+    previously did not.
     """
     before = graph.conn.execute(
         "SELECT status, paid_in, paid_quote FROM promises WHERE promise_id=?",
         (promise_id,)).fetchone()
     if before is None:
-        return
+        return ""
+    if before["status"] == "paid" and before["paid_in"] and before["paid_in"] != scene_id:
+        held, incoming = _scene_ord(graph, before["paid_in"]), _scene_ord(graph, scene_id)
+        if held is None or incoming is None or held <= incoming:
+            return before["paid_in"]
     for fieldname, new in (("status", "paid"), ("paid_in", scene_id), ("paid_quote", quote)):
         if before[fieldname] != new:
             graph.record_change(table="promises", record_id=promise_id, field=fieldname,
@@ -537,6 +580,7 @@ def _close(graph, promise_id: str, scene_id: str, run_id: str, confidence: float
     graph.conn.execute(
         "UPDATE promises SET status='paid', paid_in=?, paid_quote=? WHERE promise_id=?",
         (scene_id, quote, promise_id))
+    return ""
 
 
 def _distinctive(text: str) -> set[str]:
