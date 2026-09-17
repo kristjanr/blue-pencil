@@ -674,6 +674,30 @@ def cmd_export(args) -> int:
     return 0
 
 
+def cmd_viz(args) -> int:
+    """Serve the local half of the viewer: the information path and provenance."""
+    from .viz import ReadOnlyGraph, serve
+
+    ws = Workspace.find()
+    profile = ws.load_profile(args.profile)
+    db = args.db or ws.db_path(profile.name)
+    try:
+        g = ReadOnlyGraph(db, profile)
+    except FileNotFoundError:
+        _echo(f"no graph at {db}. Run `bp ingest` to build one, or pass --db.")
+        return 1
+    reports = g.conn.execute("SELECT COUNT(*) c FROM reports").fetchone()["c"]
+    g.close()
+    _echo(f"blue pencil · {profile.name}")
+    if not reports:
+        # The view exists to draw report hops. Saying so up front beats an
+        # empty diagram that looks like a working one.
+        _echo("  note: this graph holds no reports, so every information path"
+              " will rest on direct observation or a clone fork alone.")
+    serve(db, profile, port=args.port, host=args.host)
+    return 0
+
+
 def cmd_cost(args) -> int:
     """Estimate a run before paying for it."""
     from .llm import RATES
@@ -943,6 +967,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--character", default=None)
     sp.add_argument("--status", default=None)
     sp.set_defaults(func=cmd_graph)
+
+    sp = sub.add_parser("viz", help="serve the local viewer: information paths and citation provenance")
+    common(sp)
+    sp.add_argument("--port", type=int, default=8900)
+    sp.add_argument("--host", default="127.0.0.1",
+                    help="loopback by default; this opens an unauthenticated read-only window on the graph")
+    sp.set_defaults(func=cmd_viz)
 
     sp = sub.add_parser("export", help="entities + derived relationships as JSON, for a viewer")
     common(sp)

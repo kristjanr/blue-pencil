@@ -1,0 +1,238 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Information paths · blue pencil</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  --ground:#e9ecef;--s1:#fbfcfd;--s2:#f1f4f7;--s3:#e4e9ee;
+  --ink:#111418;--ink2:#39424d;--muted:#616c79;--line:#ccd4dc;--line2:#dee5eb;
+  --accent:#0f5ea8;--accent-soft:#d9e8f6;--nonphoto:#93cfe2;
+  --good:#0ca30c;--warning:#fab219;--serious:#ec835a;--critical:#d03b3b;
+  --display:"Fraunces",Georgia,serif;--ui:"Archivo",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0d1117;--s1:#151b23;--s2:#1c232c;--s3:#242c36;
+  --ink:#e6edf3;--ink2:#c0cbd6;--muted:#8b97a4;--line:#2a323c;--line2:#212933;
+  --accent:#5aa9f0;--accent-soft:#12304c;--nonphoto:#2f5d6e;
+}}
+:root[data-theme="dark"]{
+  --ground:#0d1117;--s1:#151b23;--s2:#1c232c;--s3:#242c36;
+  --ink:#e6edf3;--ink2:#c0cbd6;--muted:#8b97a4;--line:#2a323c;--line2:#212933;
+  --accent:#5aa9f0;--accent-soft:#12304c;--nonphoto:#2f5d6e;
+}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--ground);color:var(--ink);font-family:var(--ui);font-size:15px;line-height:1.55;
+  padding-left:20px;padding-right:20px;padding-block:0 64px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1060px;margin:0 auto}
+h1,h2,h3{margin:0;font-family:var(--display);text-wrap:balance}
+h1{font-size:clamp(28px,4.6vw,40px);font-weight:800;letter-spacing:-.02em;line-height:1.08}
+h2{font-size:20px;font-weight:600}h3{font-size:15px;font-weight:600}
+p{margin:0 0 12px}
+code,.mono{font-family:var(--mono);font-size:.86em}
+.eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+header.top{padding-block:36px 20px;border-bottom:2px solid var(--ink)}
+header.top .lede{font-family:var(--display);font-size:17px;color:var(--ink2);max-width:62ch;margin:12px 0 0}
+.provenance{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:16px;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.provenance b{color:var(--ink2);font-weight:500}
+section{padding-block:24px;border-bottom:1px solid var(--line)}
+.panel{background:var(--s1);border:1px solid var(--line);border-radius:8px;padding:16px}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+input[type=search],select,button.go{font-family:var(--ui);font-size:13.5px;color:var(--ink);
+  background:var(--s1);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+input[type=search]{flex:1 1 220px;min-width:0}
+button.go{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;cursor:pointer}
+button.go:hover{filter:brightness(1.08)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.hides{display:flex;gap:10px;background:var(--s2);border-left:3px solid var(--nonphoto);
+  border-radius:0 5px 5px 0;padding:10px 14px;margin-top:14px;font-size:13.5px;color:var(--ink2)}
+.verdict{display:flex;flex-wrap:wrap;gap:12px 22px;align-items:baseline;margin-bottom:6px}
+.verdict .big{font-family:var(--mono);font-size:22px;font-weight:700;letter-spacing:-.02em}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+  padding:2px 9px;border-radius:99px;border:1px solid currentColor}
+.pill.ok{color:var(--good)}.pill.no{color:var(--critical)}.pill.ind{color:var(--warning)}
+.hop{display:grid;grid-template-columns:22px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid var(--line2)}
+.hop:last-child{border-bottom:0}
+.hop .rail{display:flex;flex-direction:column;align-items:center}
+.hop .knot{width:11px;height:11px;border-radius:50%;background:var(--accent);flex:none;margin-top:5px}
+.hop .knot.computed{background:var(--s1);border:2px solid var(--accent)}
+.hop .stem{flex:1;width:2px;background:var(--line);margin-top:3px}
+.hop .who{font-weight:600}
+.hop .meta{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:2px}
+.hop .note{font-size:13.5px;color:var(--ink2);margin-top:3px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+.scroll{overflow-x:auto}
+th{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
+  text-align:left;padding:0 12px 7px 0;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px 12px 7px 0;border-bottom:1px solid var(--line2);vertical-align:top}
+td.r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;padding-right:16px}
+.res{background:none;border:0;border-bottom:1px solid var(--line2);padding:8px 10px;width:100%;
+  text-align:left;font:inherit;font-size:13.5px;color:var(--ink);cursor:pointer}
+.res:hover{background:var(--s2)}
+.res .m{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.list{max-height:240px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;background:var(--s1)}
+.cite{border:1px solid var(--line);border-radius:7px;padding:12px 14px;margin-bottom:10px;background:var(--s1)}
+.cite .hdr{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;margin-bottom:6px}
+.cite .sid{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.excerpt{font-family:var(--display);font-size:14px;line-height:1.6;color:var(--ink2);
+  background:var(--s2);border-radius:5px;padding:10px 12px;max-height:180px;overflow-y:auto;white-space:pre-wrap}
+mark{background:var(--accent-soft);color:var(--ink);padding:1px 2px;border-radius:2px}
+.status{padding:16px;font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+ul.tight{margin:8px 0 0;padding-left:18px}ul.tight li{margin-bottom:6px;color:var(--ink2);font-size:14px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style></head><body>
+<div class="wrap">
+
+<header class="top">
+  <span class="eyebrow">Blue Pencil · local viewer</span>
+  <h1>Information paths</h1>
+  <p class="lede">Could this character know this yet? Not a lookup — light-lag arithmetic, channel availability, and belief inherited across a clone fork, answered by the same engine the checkers use.</p>
+  <div class="provenance" id="prov"><span>connecting…</span></div>
+</header>
+
+<section>
+  <h2>Ask the question</h2>
+  <div class="controls" style="margin-top:12px">
+    <input type="search" id="q" placeholder="find an event — search its summary or id…" aria-label="Search events">
+    <input type="search" id="who" placeholder="character" aria-label="Character" style="flex:0 1 180px">
+    <button class="go" id="ask">Trace the path</button>
+  </div>
+  <div class="list" id="results" hidden></div>
+  <div id="verdict"></div>
+</section>
+
+<section id="sec-who" hidden>
+  <h2>Who else could know by then</h2>
+  <div class="scroll"><table id="whoknows"><thead><tr><th>Character</th><th>Earliest they could know</th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<section id="sec-ev" hidden>
+  <h2>The event, and what it rests on</h2>
+  <div id="evbody"></div>
+</section>
+
+<section style="border-bottom:0">
+  <h3>Why this is a separate page from the atlas</h3>
+  <ul class="tight">
+    <li><b>It needs the database, not the export.</b> <code>reports</code> — the hops, with sender, channel and arrival — is not in <code>bp export</code>, so the shareable atlas cannot draw a path at all.</li>
+    <li><b>It needs the real function.</b> Re-implementing light-lag, channel windows and fork inheritance in the browser would put two copies of the epistemic rules in play that can silently disagree. This calls <code>KnowledgeGraph.earliest_knowledge</code> and draws what it returns.</li>
+    <li><b>It needs the book text.</b> The export carries no prose and no citation quotes by design, so the question of whether a quoted line supports its claim can only be asked here, where the corpus is already local.</li>
+    <li><b>A hollow ring is a computed arrival</b> — derived from the series' space model. A filled one was stated in the text. A checker that cannot tell those apart is guessing.</li>
+  </ul>
+</section>
+
+</div>
+<script>
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const j=u=>fetch(u).then(r=>r.json());
+let current=null;
+
+j("/api/summary").then(s=>{
+  const c=s.counts;
+  document.getElementById("prov").innerHTML=
+    `<span><b>db</b> ${esc(s.database)}</span><span><b>profile</b> ${esc(s.profile||"—")}</span>`+
+    `<span><b>events</b> ${c.events.toLocaleString()}</span>`+
+    `<span><b>reports</b> ${c.reports.toLocaleString()} (${s.reports_with_arrival.toLocaleString()} with an arrival)</span>`+
+    `<span><b>beliefs</b> ${c.beliefs.toLocaleString()}</span><span><b>read-only</b> mode=ro</span>`;
+  if(!c.reports){
+    document.getElementById("verdict").innerHTML=
+      `<div class="hides"><span><b>This graph holds no reports.</b> Every path will rest on direct observation or a clone fork alone — which is a real answer, but not the one this page exists to draw.</span></div>`;
+  }
+}).catch(e=>{document.getElementById("prov").textContent="server not reachable: "+e.message;});
+
+let timer=null;
+document.getElementById("q").addEventListener("input",e=>{
+  clearTimeout(timer);
+  const v=e.target.value.trim();
+  const box=document.getElementById("results");
+  if(v.length<2){box.hidden=true;return;}
+  timer=setTimeout(()=>j("/api/search?q="+encodeURIComponent(v)).then(r=>{
+    const evs=r.events||[];
+    box.hidden=!evs.length;
+    box.innerHTML=evs.map(ev=>
+      `<button class="res" data-id="${esc(ev.event_id)}"><div>${esc(ev.summary)}</div>
+       <div class="m">${esc(ev.event_id)}${ev.day_lo!=null?` · day ${Math.round(ev.day_lo)}${ev.day_hi!=null&&ev.day_hi!==ev.day_lo?`–${Math.round(ev.day_hi)}`:""}`:" · undated"}${ev.where_place?` · ${esc(ev.where_place)}`:""}</div></button>`).join("");
+    for(const b of box.querySelectorAll(".res")) b.addEventListener("click",()=>{
+      current=b.dataset.id; document.getElementById("q").value=b.querySelector("div").textContent;
+      box.hidden=true; ask();
+    });
+  }),180);
+});
+document.getElementById("ask").addEventListener("click",ask);
+document.getElementById("who").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
+
+function ask(){
+  const who=document.getElementById("who").value.trim();
+  if(!current||!who){
+    document.getElementById("verdict").innerHTML=`<div class="hides"><span>Pick an event from the search results and name a character.</span></div>`;
+    return;
+  }
+  document.getElementById("verdict").innerHTML=`<div class="status">tracing…</div>`;
+  j(`/api/path?event=${encodeURIComponent(current)}&character=${encodeURIComponent(who)}`).then(renderPath);
+  j(`/api/event?id=${encodeURIComponent(current)}`).then(renderEvent);
+}
+
+function renderPath(p){
+  if(p.error){document.getElementById("verdict").innerHTML=`<div class="hides"><span>${esc(p.error)}</span></div>`;return;}
+  const pill=p.indeterminate?`<span class="pill ind">indeterminate</span>`
+    :p.reachable?`<span class="pill ok">reachable</span>`:`<span class="pill no">no path</span>`;
+  const head=`<div class="panel"><div class="verdict">
+      <span class="big">${p.day_text?esc(p.day_text):(p.indeterminate?"unanswerable":"never")}</span>
+      ${pill}
+      <span style="font-size:13.5px;color:var(--muted)">${esc(p.character)} · ${esc(p.event_id)}</span>
+    </div>
+    <p style="font-size:14px;color:var(--ink2);margin:6px 0 0">${esc(p.event_summary)}</p>
+    ${p.reason?`<p style="font-size:13.5px;color:var(--muted);margin:6px 0 0">${esc(p.reason)}</p>`:""}
+    ${p.hops.length?`<div style="margin-top:14px">`+p.hops.map((h,i)=>{
+      const last=i===p.hops.length-1;
+      const who=h.kind==="observed"||h.kind==="stated"?`${esc(h.recipient)} ${esc(h.note||"observed it")}`
+        :h.kind==="inherited"?`${esc(h.sender)} → ${esc(h.recipient)} at the fork`
+        :`${esc(h.sender)} → ${esc(h.recipient)}`;
+      return `<div class="hop"><div class="rail"><span class="knot${h.computed?" computed":""}"></span>${last?"":'<span class="stem"></span>'}</div>
+        <div><div class="who">${who}</div>
+          <div class="meta">${esc(h.kind)}${h.channel&&h.channel!=="unknown"?` · ${esc(h.channel)}`:""}${h.arrive_text?` · arrives ${esc(h.arrive_text)}`:""}${h.computed?" · computed from the space model":" · stated in the text"}</div>
+        </div></div>`;}).join("")+`</div>`
+      :`<div class="hides" style="margin-top:12px"><span>No hops — this is direct observation, a fork inheritance, or nothing at all.</span></div>`}
+    <div class="hides" style="margin-top:14px"><span><b>Engine verdict, verbatim:</b> <span class="mono">${esc(p.explain)}</span></span></div>
+  </div>`;
+  document.getElementById("verdict").innerHTML=head;
+  const day=p.event_day_hi??p.event_day;
+  if(day!=null){
+    j(`/api/who-knows?event=${encodeURIComponent(p.event_id)}&day=${day}`).then(rows=>{
+      document.getElementById("sec-who").hidden=!rows.length;
+      document.querySelector("#whoknows tbody").innerHTML=(rows||[]).slice(0,40).map(r=>
+        `<tr><td>${esc(r.character)}</td><td class="r">${r.day==null?"never":Math.round(r.day)}</td></tr>`).join("");
+    });
+  }
+}
+
+function renderEvent(d){
+  if(d.error){document.getElementById("sec-ev").hidden=true;return;}
+  document.getElementById("sec-ev").hidden=false;
+  const cites=(d.citations||[]).map(c=>{
+    const ex=c.excerpt||"";
+    const body=c.quote&&c.quote_found
+      ? esc(ex).replace(esc(c.quote),m=>`<mark>${m}</mark>`)
+      : esc(ex);
+    return `<div class="cite">
+      <div class="hdr"><span class="sid">${esc(c.scene_id)}</span>
+        ${c.scene?`<span class="sid">${esc(c.scene.book_id)} ch.${c.scene.chapter}${c.scene.pov?` · ${esc(c.scene.pov)}`:""}${c.scene.place?` · ${esc(c.scene.place)}`:""}</span>`:""}
+        ${c.quote?(c.quote_found?`<span class="pill ok">quote found</span>`:`<span class="pill no">quote not in this scene</span>`):`<span class="pill ind">no quote</span>`}
+      </div>
+      ${c.quote?`<p style="font-size:13.5px;color:var(--ink2);margin:0 0 8px">“${esc(c.quote)}”</p>`:""}
+      <div class="excerpt">${body}</div></div>`;}).join("");
+  document.getElementById("evbody").innerHTML=`
+    <div class="panel" style="margin-bottom:14px">
+      <div style="font-size:12px;color:var(--muted);font-family:var(--mono)">participants ${esc((d.participants||[]).join(", ")||"—")} · observed by ${esc((d.observed_by||[]).join(", ")||"—")}</div>
+      ${(d.reports||[]).length?`<div class="scroll" style="margin-top:12px"><table><thead><tr><th>From</th><th>To</th><th>Channel</th><th class="r">Departs</th><th class="r">Arrives</th><th>Arrival</th></tr></thead><tbody>`+
+        d.reports.map(r=>`<tr><td>${esc(r.sender)}</td><td>${esc(r.recipient)}</td><td class="mono">${esc(r.channel)}</td>
+          <td class="r">${r.depart_day==null?"—":Math.round(r.depart_day)}</td>
+          <td class="r">${r.arrive_day==null?"—":Math.round(r.arrive_day)}</td>
+          <td>${r.computed?"computed":"stated"}</td></tr>`).join("")+`</tbody></table></div>`
+        :`<div class="hides" style="margin-top:12px"><span>No reports on this event — nobody is recorded as telling anybody.</span></div>`}
+    </div>
+    <h3 style="margin-bottom:8px">Citations</h3>
+    ${cites||`<div class="status">no citations on this record</div>`}`;
+}
+</script></body></html>
