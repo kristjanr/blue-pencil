@@ -1,0 +1,65 @@
+# Promises the extractor emitted already marked `paid`, never touched by a
+# settle run (no record_changes trail). 41 of them; 40 were "paid" in their own
+# planting scene.
+#
+# Why this matters more than the missing quotes it was filed under: a promise
+# born paid is never offered to any later scene. It does not appear in a
+# listing, cannot be closed, and cannot be counted as open. It leaves the
+# ledger silently — the project's own recurring defect, absence read as
+# resolution.
+#
+# Three verdicts:
+#   keep_paid  the scene really does raise and discharge it in one beat
+#   reopen     forward-looking; the payoff is somewhere later and was never sought
+#   abandon    not a promise at all — a completed event, an explanation, or a
+#              payoff of something earlier recorded as if it were a new debt
+#
+# `abandon` is not a deletion: the record stays, with its reason, and stops
+# distorting the open/paid counts.
+
+keep_paid:
+  - {id: gandalf_closemouthed_abilities, why: "the hidden power is shown later in this same scene — wand, True Seeing, spellbook"}
+  - {id: prom_fred_death_foretold,       why: "Buster kills Fred in this scene; the prediction is discharged where it is made"}
+  - {id: prom_vow_revenge_homer,         why: "vow and delivery are one beat: 'That's for Homer.'"}
+  - {id: bender_dramatic_chase_vow,      why: "the wish is granted literally, within the scene"}
+  - {id: p-time-tunnel-theory-tested,    why: "raised and debunked by Bill in the same scene"}
+  - {id: p60.3-5,                        why: "Elmer's death and farewell complete here"}
+
+reopen:
+  - {id: setup_suspicion,            why: "foreshadows Kevin's betrayal, which is not in this scene"}
+  - {id: kevin_revenge_plot,         why: "the record itself says 'culminating in' the campaign trap — later"}
+  - {id: vengeance_for_pav_and_others, why: "'implying further reckoning' regarding the Others' genocide — explicitly forward"}
+  - {id: riker-talk-colonel-vehement, why: "a mental note to follow up; the follow-up is the payoff and it is not here"}
+  - {id: p_vickers_killed,           why: "'pending confirmation via drone surveillance' — pending is not paid"}
+  - {id: bob1_departure_pilgrimage,  why: "a vow to go out alone and build relays; spans the rest of the series"}
+  - {id: bob_blog_announcement,      why: "'setting stage for factional reactions' — the reactions are the payoff"}
+  - {id: prom_earth_situation_shared, why: "'setting up further reaction/response from other Bobs'"}
+  - {id: bill_avenge_milo,           why: "carries no paid_in at all; let settling locate the assault that pays it"}
+  - {id: prom_deltan_tech_evolution, why: "foreshadows Deltan development that runs for books"}
+  - {id: p_skippies_hidden_data,     why: "concealment suggested here, exposed later"}
+  - {id: prom_theresa_replicant,     why: "'she will be uploaded' — future tense in the summary itself"}
+  - {id: prom_council_permits_joke,  why: "foreshadows an ongoing hidden tech advantage"}
+  - {id: prom_starfield_id,          why: "a stated need to fix Icarus's position — an open task, not a finding"}
+  - {id: p60.3-4,                    why: "the differential is taken here, but Bill carrying Elmer forward is the debt"}
+
+abandon:
+  - {id: prom_volcanic_wave,          why: "the arrival of an anticipated wave — this is a payoff, recorded as a promise"}
+  - {id: prom_clone_decision,         why: "a recurring character trait, not a discrete debt; 'resolved partially' in scene"}
+  - {id: p_brazil_attacks_vehemant,   why: "a confirmation — pays off earlier suspicion rather than owing anything"}
+  - {id: p_homer_suicide,             why: "a completed event"}
+  - {id: p_vehemant_hq_destroyed,     why: "a completed event"}
+  - {id: prom_three_backups_lost,     why: "a completed event, already entered in the In Memoriam list"}
+  - {id: b2.28.3-charles-cleared,     why: "inspection run and suspicion cleared, both in scene"}
+  - {id: p_book2_08_4_bronto_fence,   why: "problem and electrified-wire fix stated in one sentence"}
+  - {id: prom_bob_archimedes_right,   why: "validates an earlier claim — a payoff, not a debt"}
+  - {id: prom_others_blind_spot_launch, why: "'earlier foreshadowing ... now appears confirmed' — the confirmation"}
+  - {id: p_heavenriver_sky_hologram,  why: "exposition: the hologram is explained where it is raised"}
+  - {id: prom_george_death_explained, why: "death confirmed and explained by the note, in scene"}
+  - {id: prom_george_no_replicant,    why: "forecloses a future rather than promising one; nothing can pay it"}
+  - {id: prom_george_consent_revoked, why: "an irreversible fact established, by its own wording"}
+  - {id: b4.05.1-p4,                  why: "an observation confirming a deduction already made"}
+  - {id: archimedes_death,            why: "a completed event; Bob's grief is a separate thread if it is one"}
+  - {id: prom_homer_traitor_revealed, why: "the revelation itself — pays off the traitor suspicion, owes nothing"}
+  - {id: p_riker_lesson,              why: "a backward reference to a past battle, not a forward debt"}
+  - {id: bob_marvin_reconciliation,   why: "a prior conflict resolved in scene"}
+  - {id: prom_fake_hugh_ancestry,     why: "planted_in is empty — a payoff record with no promise behind it"}

@@ -151,14 +151,36 @@ promises, so a thesis that paid off **every promise it was shown** scores covera
 0.0119 evidence vs 0.2000 self-report. Suggested fix: normalise coverage against
 the weight actually *offered* to the model, not the whole ledger.
 
-**B. Nothing ever closes a promise.** 2,842 open / 41 paid / 3 abandoned, of 2,886.
-Threads: 1,865 open / 51 dormant / 51 closed, of 1,967. Across five *finished*
-books, 98.6% of promises are recorded as never paid off — there is no pass that
-settles a ledger entry when later text cashes it. This is why A bites: the
-denominator is inflated by roughly the whole corpus, and the planner's window is
-filled with setups book 3 already resolved. **Book 6 is being planned around dead
-material.** Needs a "settle the ledger" pass over books 1–5 before any thesis
-ranking is trusted. This is the biggest open item in the project.
+**B. Nothing ever closes a promise.** — *being settled; books 1-2 done 2026-09-17/18.*
+Was 2,842 open / 41 paid / 3 abandoned, of 2,886. Now **2,505 open / 358 paid /
+23 abandoned**, every paid one carrying the scene that pays it, a verified quote,
+and a `record_changes` trail.
+
+Books 1 and 2 settled live and sequentially (drop-as-closed; the earliest payoff
+is the correct one), 353 closes, $12.28. Books 3-5 are priced at **$47.26** and
+wait on Kris.
+
+Those original 41 "paid" turned out not to be settlements at all. They had no
+`record_changes` trail because no run ever touched them: **the extractor emitted
+them already marked paid**, 40 of the 41 in their own planting scene. A promise
+born paid never enters a listing, is never offered to a later scene, and can be
+neither closed nor counted as open — it leaves the ledger silently. The house
+defect again, absence read as resolution, this time in the extraction prompt.
+
+Ruled one by one in `eval/extractor_born_paid_verdicts.yaml`: 6 kept paid (the
+scene really does raise and discharge it in one beat — Riker's *"That's for
+Homer."*), 15 reopened (forward-looking, payoff never sought; several say so in
+their own summary — *"pending confirmation via drone surveillance"*, *"she will
+be uploaded"*), 20 abandoned (completed events, exposition, and payoffs of
+earlier promises recorded as if they were new debts). The 6 kept had their
+evidence located by hand so nothing in the ledger is now unauditable.
+
+Forwarded to the peer: extraction must stop emitting `status='paid'` — assertable
+deterministically rather than left to the prompt — and the third class argues for
+a payoff record that points at the promise it pays, which would capture those
+20-odd instead of discarding them. Also forwarded: `settle_batch` resolves
+duplicate closes by whichever batch result arrives last, which is arbitrary and
+can name the wrong scene.
 
 **C. `planted_in` was never pinned the way citations were.** 46 promises point at
 a scene id that does not exist (`book5.15.3`, `B2.66.1` — the same reformatting
