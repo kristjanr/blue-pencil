@@ -7,7 +7,7 @@ both look perfectly well-formed in the table.
 
 from bp.extract import ExtractReport, _write_records
 from bp.models import Citation, Promise
-from bp.settle import SettleReport, _close
+from bp.settle import SettleReport, _close, audit_paid_promises
 
 
 def _promise(graph, scenes, pid="P-1"):
@@ -80,6 +80,87 @@ def test_two_scenes_closing_one_promise_is_reported_not_just_resolved():
     ])
     assert report.double_closed() == [("P-1", ["S-1", "S-4"])]
     assert "P-1" in report.render()
+
+
+def _paid_by_hand(graph, pid, scene_id, quote, *, trail=True):
+    """What a correction script does: straight into the table, past `_close`."""
+    graph.conn.execute(
+        "UPDATE promises SET status='paid', paid_in=?, paid_quote=? WHERE promise_id=?",
+        (scene_id, quote, pid))
+    if trail:
+        graph.record_change(table="promises", record_id=pid, field="status",
+                            old="open", new="paid", run_id="script", reason="ruled by hand")
+    graph.commit()
+
+
+def test_a_close_written_straight_into_the_table_still_has_to_prove_itself(world):
+    """The write-path guard sees none of this; the audit reads what is stored."""
+    graph, _ = world
+    scene = graph.scenes()[2]
+    _promise(graph, [s.scene_id for s in graph.scenes()])
+    _paid_by_hand(graph, "P-1", scene.scene_id, scene.text[:60])
+
+    audit = audit_paid_promises(graph)
+    assert audit.paid == 1 and audit.failures == 0
+    assert "all three invariants hold" in audit.render()
+
+
+def test_a_quote_that_no_longer_appears_in_its_scene_is_caught(world):
+    """A quote is verified when stored and never again.
+
+    The drop-cap repair rewrote the opening line of hundreds of scenes. Any
+    close whose evidence lived in one of those lines went stale silently, and
+    nothing else in the system would ever look.
+    """
+    graph, _ = world
+    scene = graph.scenes()[2]
+    _promise(graph, [s.scene_id for s in graph.scenes()])
+    _paid_by_hand(graph, "P-1", scene.scene_id, scene.text[:60])
+    assert audit_paid_promises(graph).failures == 0, "clean before the corpus moves"
+
+    graph.conn.execute("UPDATE scenes SET text=? WHERE scene_id=?",
+                       ("something else entirely, at length, with other words in it",
+                        scene.scene_id))
+    graph.commit()
+
+    audit = audit_paid_promises(graph)
+    assert [p for p, _s in audit.quote_not_in_scene] == ["P-1"]
+    assert "LEDGER AUDIT FAILED" in audit.render()
+
+
+def test_a_close_with_no_quote_or_no_trail_is_caught(world):
+    graph, _ = world
+    scenes = [s.scene_id for s in graph.scenes()]
+    _promise(graph, scenes, "P-quoteless")
+    _promise(graph, scenes, "P-trailless")
+    _paid_by_hand(graph, "P-quoteless", scenes[2], "")
+    _paid_by_hand(graph, "P-trailless", scenes[2], graph.scenes()[2].text[:60], trail=False)
+
+    audit = audit_paid_promises(graph)
+    assert audit.no_quote == ["P-quoteless"]
+    assert audit.no_trail == ["P-trailless"]
+
+
+def test_a_paid_in_naming_no_scene_is_not_silently_skipped(world):
+    """An unresolvable scene reference cannot be checked, so it must be reported."""
+    graph, _ = world
+    _promise(graph, [s.scene_id for s in graph.scenes()])
+    _paid_by_hand(graph, "P-1", "B9.99.9", "a quote from nowhere")
+
+    audit = audit_paid_promises(graph)
+    assert [p for p, _s in audit.scene_missing] == ["P-1"]
+
+
+def test_a_ledger_with_nothing_paid_does_not_report_clean(world):
+    """The house bug: every clause passes because nothing was examined."""
+    graph, _ = world
+    graph.conn.execute("UPDATE promises SET status='open'")
+    graph.commit()
+
+    audit = audit_paid_promises(graph)
+    assert audit.failures == 0 and audit.paid == 0
+    assert "this is not a pass" in audit.render(), \
+        "a check that looked at nothing must say so, not pass"
 
 
 def test_extraction_cannot_hand_back_a_promise_already_paid(world):

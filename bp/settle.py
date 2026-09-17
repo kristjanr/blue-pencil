@@ -117,6 +117,93 @@ def billed_tokens_per_call(candidates: float) -> tuple[float, float]:
 
 
 @dataclass
+class LedgerAudit:
+    """Whether every paid promise in the table can prove it was paid.
+
+    A guard on the write path only sees writes that take the write path. Most
+    corrections to this ledger have not: the entity merges, the drop-cap
+    repair, the 142 restored demotions and the 41 born-paid promises were all
+    applied by scripts opening the database directly, and `bp resolve apply` is
+    the only one of those that has a command behind it. So this reads what is
+    actually stored and asks the three questions a close has to be able to
+    answer, whoever wrote it.
+
+    The third is the one worth having. A quote is verified against the scene
+    when it is stored, and never again — so a corpus repair that moves the text
+    out from under it leaves a close whose evidence no longer exists. The
+    drop-cap fix edited the opening line of hundreds of scenes and nobody
+    checked. That failure is invisible from every other angle.
+    """
+
+    paid: int = 0
+    no_scene: list[str] = field(default_factory=list)
+    scene_missing: list[tuple[str, str]] = field(default_factory=list)
+    no_quote: list[str] = field(default_factory=list)
+    quote_not_in_scene: list[tuple[str, str]] = field(default_factory=list)
+    no_trail: list[str] = field(default_factory=list)
+
+    @property
+    def failures(self) -> int:
+        return (len(self.no_scene) + len(self.scene_missing) + len(self.no_quote)
+                + len(self.quote_not_in_scene) + len(self.no_trail))
+
+    def render(self) -> str:
+        # A ledger with nothing paid in it passes every clause above without
+        # examining anything, and reporting that as clean is the bug this
+        # project keeps finding. Say what was checked, not just what failed.
+        if not self.paid:
+            return "ledger audit: no paid promises to check — this is not a pass"
+        if not self.failures:
+            return f"ledger audit: {self.paid:,} paid promises, all three invariants hold"
+        lines = [f"LEDGER AUDIT FAILED: {self.failures} of {self.paid:,} paid promises"]
+        for label, bad in (("no paid_in", self.no_scene),
+                           ("paid_in names no scene", self.scene_missing),
+                           ("no paid_quote", self.no_quote),
+                           ("quote is not in the scene it names", self.quote_not_in_scene),
+                           ("no record_changes trail", self.no_trail)):
+            if bad:
+                shown = [b[0] if isinstance(b, tuple) else b for b in bad[:5]]
+                lines.append(f"  {label}: {len(bad)} ({', '.join(shown)})")
+        return "\n".join(lines)
+
+
+def audit_paid_promises(graph: Graph) -> LedgerAudit:
+    """Read the ledger and check that every close can still prove itself."""
+    audit = LedgerAudit()
+    rows = graph.conn.execute(
+        "SELECT promise_id, paid_in, paid_quote FROM promises WHERE status='paid'").fetchall()
+    audit.paid = len(rows)
+    if not rows:
+        return audit
+
+    wanted = {r["paid_in"] for r in rows if r["paid_in"]}
+    scenes = {}
+    if wanted:
+        qs = ",".join("?" * len(wanted))
+        scenes = {r["scene_id"]: r["text"] for r in graph.conn.execute(
+            f"SELECT scene_id, text FROM scenes WHERE scene_id IN ({qs})", tuple(wanted))}
+    normed = {sid: _norm(text) for sid, text in scenes.items()}
+    with_trail = {r[0] for r in graph.conn.execute(
+        "SELECT DISTINCT record_id FROM record_changes WHERE table_name='promises'")}
+
+    for row in rows:
+        pid, sid, quote = row["promise_id"], row["paid_in"], row["paid_quote"] or ""
+        if pid not in with_trail:
+            audit.no_trail.append(pid)
+        if not sid:
+            audit.no_scene.append(pid)
+            continue
+        if sid not in scenes:
+            audit.scene_missing.append((pid, sid))
+            continue
+        if not quote:
+            audit.no_quote.append(pid)
+        elif not quote_in_scene(quote, normed[sid], scenes[sid]):
+            audit.quote_not_in_scene.append((pid, sid))
+    return audit
+
+
+@dataclass
 class IndexReport:
     """The shape of the work Stage 2 would have to do."""
 
@@ -136,6 +223,11 @@ class IndexReport:
     #: The judge model this pass would really use. Empty means "not told", and
     #: the per-book table then says so rather than quietly pricing at sonnet.
     model: str = ""
+    #: The state of what has already been settled. Shown here because this is
+    #: the command run before deciding to spend on the next book, and a listing
+    #: built over a ledger whose closes cannot prove themselves is costing money
+    #: to extend a bad record.
+    audit: LedgerAudit = field(default_factory=LedgerAudit)
 
     def cost_usd(self, rate_in: float, rate_out: float | None = None,
                  *, batch: bool = True, calls: int | None = None) -> float:
@@ -185,6 +277,7 @@ class IndexReport:
             f"candidates per scene: median {med:.0f}, p90 {p90}, max {max(sizes) if sizes else 0}",
             f"promises with no resolvable plant (every scene is 'after'): {self.unanchored:,}",
             f"promises owed to nobody resolvable (over-included, never dropped): {self.unowned:,}",
+            self.audit.render(),
             "",
             f"one pass = {self.scenes:,} calls · {self.prompt_tokens:,} estimated input tokens "
             f"(a description of the work; the price below does not use it)",
@@ -279,7 +372,7 @@ def candidate_index(graph: Graph, profile: SeriesProfile | None = None,
         claimants = normed.get(norm_name(raw), set())
         return next(iter(claimants)) if len(claimants) == 1 else ""
 
-    report = IndexReport(scenes=len(scenes))
+    report = IndexReport(scenes=len(scenes), audit=audit_paid_promises(graph))
     index: dict[str, list[str]] = {s["scene_id"]: [] for s in scenes}
 
     skip = exclude or set()
