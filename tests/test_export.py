@@ -9,7 +9,7 @@ import json
 import pytest
 
 from bp.export import Resolver, build_export, derive_edges, verify_no_corpus_text, write_export
-from bp.models import Citation, Entity, Event
+from bp.models import Citation, Contradiction, Entity, Event
 
 
 def _cit(scene="LW1.01.1"):
@@ -91,6 +91,67 @@ def test_observation_keeps_its_direction():
     events = [{"event_id": "E-1", "participants": ["Ana"], "observed_by": ["Cyra"]}]
     edges = derive_edges([], events, [])
     assert [(e["source"], e["target"]) for e in edges] == [("Cyra", "Ana")]
+
+
+def test_a_report_is_a_directed_edge_from_sender_to_recipient():
+    """Who told whom is the route a belief travelled; it is not symmetric."""
+    reports = [{"event_id": "E-1", "sender_entity": "Cyra", "recipient_entity": "Ana"}]
+    edges = derive_edges([], [], [], (), reports)
+    assert [(e["source"], e["target"], e["kind"]) for e in edges] \
+        == [("Cyra", "Ana", "informed")]
+
+
+def test_sharing_a_scene_is_not_the_same_edge_as_sending_word(world):
+    """co_participant and informed must stay distinct — one implies a channel."""
+    doc = _export(world)["graph.json"]
+    kinds = {e["kind"] for e in doc["edges"]}
+    assert "informed" in kinds
+    assert "informed" in doc["edge_kinds"], "and it must say where it came from"
+
+
+def test_a_channel_is_matched_to_one_the_profile_actually_declares(world):
+    """Only a declared channel has a speed, and only a speed dates an arrival."""
+    reports = _export(world)["detail.json"]["reports"]
+    by_channel = {r["channel"]: r for r in reports}
+    assert by_channel["radio"]["channel_declared"] == "radio"
+    assert by_channel["radio"]["channel_instant"] is False
+    assert by_channel["lattice"]["channel_instant"] is True
+
+
+def test_an_undeclared_channel_says_unknown_rather_than_guessing(world):
+    """90 free-text spellings, 2 declared channels. The gap has to be visible."""
+    graph, profile = world
+    graph.conn.execute("UPDATE reports SET channel='shouted across the hangar'"
+                       " WHERE channel='radio'")
+    graph.commit()
+
+    doc = build_export(graph, profile)
+    hops = doc["detail.json"]["reports"]
+    shouted = [r for r in hops if r["channel"] == "shouted across the hangar"]
+    assert shouted and all(r["channel_declared"] is None for r in shouted)
+    assert all(r["channel_instant"] is None for r in shouted), \
+        "an unknown speed is not the same as an instant one"
+
+    quality = doc["graph.json"]["data_quality"]["channels"]
+    assert quality["no_declared_channel"] == len(shouted)
+    assert "radio" in quality["declared"]
+
+
+def test_a_contradiction_carries_its_scenes_not_its_quotes(world):
+    """cites_a holds whole citation records — quote text included."""
+    graph, profile = world
+    quote = graph.scenes()[0].text[:120]
+    graph.write_contradiction(Contradiction(
+        contradiction_id="C-1", subject="where Ana was",
+        reading_a="on the station", reading_b="already aboard",
+        citations_a=[Citation(scene="LW1.01.1", quote=quote)],
+        citations_b=[Citation(scene="LW1.02.1", quote=quote)]))
+    graph.commit()
+
+    docs = build_export(graph, profile)
+    found = docs["detail.json"]["contradictions"]
+    assert [c["cites_a"] for c in found] == [["LW1.01.1"]]
+    assert quote not in json.dumps(docs), "the quote must not ride along"
 
 
 def test_nobody_is_related_to_themselves():

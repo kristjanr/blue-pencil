@@ -259,14 +259,16 @@ Two lessons from the Linux transcription that must carry over:
 
 `bp export --profile bobiverse --out ./export` writes `graph.json` (entities,
 the derived edge list, books, scene metadata, threads, objects) and
-`detail.json` (events, the causal chain, beliefs, promises, the citation
-index). Anything building a viewer should run this rather than open the SQLite
-file, for three reasons the schema does not advertise:
+`detail.json` (events, the causal chain, beliefs, reports, promises,
+contradictions, the citation index). Anything building a viewer should run this
+rather than open the SQLite file, for three reasons the schema does not
+advertise:
 
 - **The `relationships` table is empty and nothing writes it.** Relationships
   are implicit — `entities.parent_id`, event participation, `observed_by`,
-  thread membership. `bp/export.py` derives them into one typed edge list,
-  4,953 edges weighted by how many events or threads produced each.
+  thread membership, and `reports` sender/recipient. `bp/export.py` derives them
+  into one typed edge list, 5,405 edges weighted by how many events, threads or
+  message hops produced each.
 - **Entity references are not consistently entity ids.** One column holds ids,
   display names and aliases interchangeably. The resolver folds all three; what
   it still cannot resolve is listed in `data_quality`, not dropped silently.
@@ -274,6 +276,15 @@ file, for three reasons the schema does not advertise:
   slices of real scene prose and citation quotes are searched for in the
   serialised bytes before anything is written, and the check reports how many
   probes it ran so a clean result cannot mean it looked at nothing.
+
+`reports` is the information path — `beliefs` says Howard knew, `reports` says
+how the news reached him, over what channel, and whether the arrival was
+*stated* in the text or *computed* from the space model. Two numbers a viewer
+should show rather than smooth over: only 1,315 of 2,219 hops name a channel the
+profile declares a speed for (the rest are real hops of unknown duration, not
+instant ones), and 269 hops have an endpoint that resolves to no entity —
+almost all broadcasts to a crowd, "assembled Bobs" and "moot attendees", which
+have no single recipient. Both are counted in `data_quality.channels`.
 
 The viewer handover page — data model, derivation, caveats, live browser — is
 published at <https://claude.ai/artifact/YHyo9cQrXocBtx6fdkmkDk> with both JSON

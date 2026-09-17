@@ -7,9 +7,16 @@ particular are not obvious from the schema and cost a newcomer real time:
 **The ``relationships`` table is empty, and that is not a bug.** Nothing in the
 extraction pipeline writes it. Relationships in this graph are implicit,
 scattered across five other tables: a replicant's ``parent_id``, the cast of an
-event, who ``observed_by`` watching it, who shares a thread. :func:`derive_edges`
-makes them explicit as one typed edge list so every consumer derives the same
-graph rather than each inventing its own.
+event, who ``observed_by`` watching it, who shares a thread, and who sent word
+to whom in ``reports``. :func:`derive_edges` makes them explicit as one typed
+edge list so every consumer derives the same graph rather than each inventing
+its own.
+
+``reports`` deserves its own line, because it is the only table that says how a
+character came to know something. ``beliefs`` records the outcome — Howard knew
+— and ``reports`` records the route, the channel, and whether the arrival date
+was *stated in the text* or *computed* from the profile's space model. Without
+it a viewer can draw who knew what and nothing about how the news travelled.
 
 **Entity references are not consistently entity ids.** The same field holds
 ``"bob-3-bill"`` (an id), ``"Garfield"`` (a display name) and ``"Enoki"`` (an
@@ -42,6 +49,8 @@ EDGE_KINDS: dict[str, str] = {
     "co_participant": "two entities named in one event's participants",
     "observed": "an entity in an event's observed_by -> an entity in its participants",
     "shares_thread": "two entities named in one thread's characters",
+    "informed": "reports.sender -> reports.recipient — one hop of information, "
+                "the route by which a belief reached someone",
 }
 
 
@@ -52,6 +61,30 @@ def _jlist(raw: str | None) -> list[str]:
     except (json.JSONDecodeError, TypeError):
         return []
     return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def _channel_view(profile: SeriesProfile | None, raw: str | None) -> dict[str, Any]:
+    """Match a report's free-text channel to a channel the profile declares.
+
+    ``reports.channel`` is whatever the extractor read off the page, so it is
+    free text and there is a lot of it — the Bobiverse graph holds 90 distinct
+    spellings across 2,219 reports, including "in-person", "in-person speech"
+    and "in-person (VR)" as three separate values. A viewer that groups on the
+    raw string draws a 90-item legend and learns nothing.
+
+    The profile, though, declares the channels that actually have a *speed*
+    (radio at c, SCUT instant), and speed is the only property that changes
+    what a character could know. So the coarse field here is not a taxonomy of
+    my own invention: it is "which declared channel is this, if any", and a
+    ``None`` is the honest answer for the ~40% that match nothing — those
+    reports have no computable arrival, and the viewer should say so rather
+    than draw them as though it knew.
+    """
+    text = (raw or "").casefold()
+    for ch in (profile.channels if profile else []):
+        if ch.name.casefold() in text:
+            return {"channel_declared": ch.name, "channel_instant": ch.instant}
+    return {"channel_declared": None, "channel_instant": None}
 
 
 @dataclass
@@ -142,7 +175,8 @@ class Resolver:
 
 def derive_edges(entities: Sequence[dict], events: Sequence[dict],
                  threads: Sequence[dict],
-                 declared: Sequence[dict] = ()) -> list[dict[str, Any]]:
+                 declared: Sequence[dict] = (),
+                 reports: Sequence[dict] = ()) -> list[dict[str, Any]]:
     """Every entity-to-entity relationship the graph implies, as one edge list.
 
     One edge per relationship, not per occurrence — a pair that recurs across
@@ -197,11 +231,37 @@ def derive_edges(entities: Sequence[dict], events: Sequence[dict],
         for a, b in combinations(cast, 2):
             add(a, b, "shares_thread", via=t["thread_id"])
 
+    # Who told whom. Directed, and never folded in with co_participant: sharing
+    # a scene is not the same fact as one of them having sent word, and the
+    # information path is the only edge kind that carries a delivery date.
+    for rep in reports:
+        add(rep.get("sender_entity"), rep.get("recipient_entity"), "informed",
+            via=rep.get("event_id", ""))
+
     return list(edges.values())
 
 
 def _rows(graph: Graph, sql: str) -> list[dict[str, Any]]:
     return [dict(r) for r in graph.conn.execute(sql)]
+
+
+def _channel_quality(profile: SeriesProfile | None,
+                     reports: Sequence[dict]) -> dict[str, Any]:
+    """How much of the information path has a channel with a declared speed."""
+    undeclared = Counter(r["channel"] for r in reports if not r["channel_declared"])
+    return {
+        "note": "reports.channel is free text. Only a channel the profile "
+                "declares has a speed, and only a speed makes an arrival date "
+                "computable. Reports on an undeclared channel are real hops "
+                "with an unknown duration — not instant, not absent.",
+        "declared": [c.name for c in (profile.channels if profile else [])],
+        "matched_a_declared_channel": sum(1 for r in reports if r["channel_declared"]),
+        "no_declared_channel": sum(undeclared.values()),
+        "distinct_raw_channels": len({r["channel"] for r in reports}),
+        "top_undeclared": undeclared.most_common(20),
+        "arrival_computed": sum(1 for r in reports if r["computed"]),
+        "arrival_stated": sum(1 for r in reports if not r["computed"]),
+    }
 
 
 def build_export(graph: Graph, profile: SeriesProfile | None = None) -> dict[str, dict]:
@@ -228,6 +288,7 @@ def build_export(graph: Graph, profile: SeriesProfile | None = None) -> dict[str
         o["aliases"] = _jlist(o["aliases"])
         o["holder_entity"] = resolver.resolve(o["holder"])
 
+    # Explicit columns, not SELECT *: scenes.text is the novel.
     scenes = _rows(
         graph,
         "SELECT scene_id, book_id, chapter, scene, chapter_title, pov, date_text,"
@@ -250,8 +311,17 @@ def build_export(graph: Graph, profile: SeriesProfile | None = None) -> dict[str
         r["source_entity"] = resolver.resolve(r["source"])
         r["target_entity"] = resolver.resolve(r["target"])
 
-    edges = derive_edges(entities, events, threads, declared)
+    reports = _rows(graph, "SELECT * FROM reports")
+    for rep in reports:
+        rep["sender_entity"] = resolver.resolve(rep["sender"])
+        rep["recipient_entity"] = resolver.resolve(rep["recipient"])
+        rep.update(_channel_view(profile, rep["channel"]))
 
+    edges = derive_edges(entities, events, threads, declared, reports)
+
+    # Explicit columns, not SELECT *: promises.paid_quote is verbatim book text.
+    # verify_no_corpus_text would catch a widened select, but it would catch it
+    # by refusing to export at all, which is a bad way to learn this.
     promises = _rows(graph, "SELECT promise_id, summary, kind, planted_in, owed_by,"
                             "       status, paid_in, weight, claim_type, confidence"
                             "  FROM promises")
@@ -262,6 +332,18 @@ def build_export(graph: Graph, profile: SeriesProfile | None = None) -> dict[str
     beliefs = _rows(graph, "SELECT * FROM beliefs")
     for b in beliefs:
         b["character_entity"] = resolver.resolve(b["character"])
+
+    # cites_a/cites_b hold whole citation records, quote text included, so this
+    # is the one table that cannot be handed over as stored. Reduced to the
+    # scene ids, which is all a viewer can act on anyway. Empty today; it would
+    # not have stayed empty, and the leak would have surfaced as a hard refusal
+    # on the first run that opened a contradiction.
+    contradictions = _rows(graph, "SELECT * FROM contradictions")
+    for c in contradictions:
+        for side in ("cites_a", "cites_b"):
+            raw = json.loads(c[side] or "[]")
+            c[side] = [x.get("scene", "") for x in raw if isinstance(x, dict)]
+        c["resolved"] = bool(c["resolved"])
 
     degree: Counter = Counter()
     for e in edges:
@@ -279,8 +361,9 @@ def build_export(graph: Graph, profile: SeriesProfile | None = None) -> dict[str
         "files": {
             "graph.json": "entities, the derived edge list, books, scene metadata, "
                           "threads, objects",
-            "detail.json": "events, the event causal chain, beliefs, promises, "
-                           "citation index — fetched on demand",
+            "detail.json": "events, the event causal chain, beliefs, reports, "
+                           "promises, contradictions, citation index — fetched "
+                           "on demand",
         },
     }
 
@@ -296,6 +379,8 @@ def build_export(graph: Graph, profile: SeriesProfile | None = None) -> dict[str
         "promises": len(promises),
         "objects": len(objects),
         "beliefs": len(beliefs),
+        "reports": len(reports),
+        "contradictions": len(contradictions),
         "scenes": len(scenes),
     }
 
@@ -312,6 +397,7 @@ def build_export(graph: Graph, profile: SeriesProfile | None = None) -> dict[str
         "ambiguous_names": resolver.ambiguous,
         "ambiguous_mentions": sum(resolver.ambiguous_hits.values()),
         "ambiguous_mention_counts": resolver.ambiguous_hits.most_common(60),
+        "channels": _channel_quality(profile, reports),
     }
 
     graph_doc = {
@@ -335,6 +421,8 @@ def build_export(graph: Graph, profile: SeriesProfile | None = None) -> dict[str
         "event_edges": _rows(graph, "SELECT src, dst, kind FROM event_edges"),
         "promises": promises,
         "beliefs": beliefs,
+        "reports": reports,
+        "contradictions": contradictions,
         "citations": _rows(graph, "SELECT record_kind, record_id, scene_id FROM citations"),
     }
     return {"graph.json": graph_doc, "detail.json": detail_doc}
