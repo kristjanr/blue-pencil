@@ -29,6 +29,10 @@ from .errors import UncitedClaim
 from .llm import (
     BATCH_DISCOUNT, Usage, _cacheable, poll_batch, rate_for, schema_tokens, structured, submit_batch,
 )
+# `_salvage` moved to `llm` when settling turned out to need it too — one place
+# to be right. Re-exported because it is the extractor's own repair layer and
+# every caller and test here already knows it by this name.
+from .llm import _salvage, _walk  # noqa: F401
 from .models import (
     Citation, Contradiction, Entity, Event, ObjectRecord, Promise, TechniqueSpec, Thread,
 )
@@ -348,90 +352,6 @@ def extract(
     prune(graph, profile, report)
     graph.commit()
     return report
-
-
-def _walk(data, loc):
-    """The container holding ``loc[-1]``, or None if the path does not exist."""
-    node = data
-    for key in loc[:-1]:
-        try:
-            node = node[key]
-        except (KeyError, IndexError, TypeError):
-            return None
-    return node
-
-
-def _salvage(schema, data, report: "ExtractReport", where: str):
-    """Validate a pass's payload, losing the bad record instead of the whole scene.
-
-    ``extra="forbid"`` is deliberate — it is what stops the extraction schema and
-    the table schema drifting apart unnoticed — but combined with whole-payload
-    validation it means one invented field costs a scene every record it had.
-    So keep the strictness and narrow the blast radius: drop the unknown field,
-    drop the record whose enum is outside the vocabulary, and validate again.
-
-    An enum is never guessed. A belief that arrives as ``believes`` could mean
-    ``knows`` or ``believes_false``, and those are opposites to the epistemic
-    checker, so the record goes rather than the polarity being invented.
-    """
-    for _ in range(60):
-        try:
-            return schema.model_validate(data)
-        except ValidationError as exc:
-            progressed = False
-            for err in exc.errors():
-                loc, kind = list(err["loc"]), err["type"]
-                if not loc:
-                    continue
-                parent = _walk(data, loc)
-                if parent is None:
-                    continue
-                if kind in ("list_type", "dict_type") and isinstance(err.get("input"), str):
-                    # The tool call arrived with its array serialised as a string
-                    # rather than as JSON. The records are all there; they are one
-                    # json.loads away from being usable.
-                    try:
-                        parent[loc[-1]] = json.loads(err["input"])
-                    except (ValueError, KeyError, IndexError, TypeError):
-                        continue
-                    report.unwrapped_json += 1
-                    progressed = True
-                elif kind == "list_type" and isinstance(err.get("input"), dict):
-                    # The ledger pass sometimes wraps each list in a second copy
-                    # of its own key: {"objects": {"objects": [...]}}. The records
-                    # are intact one level down.
-                    inner = err["input"].get(loc[-1])
-                    if not isinstance(inner, list):
-                        continue
-                    parent[loc[-1]] = inner
-                    report.unwrapped_json += 1
-                    progressed = True
-                elif kind == "extra_forbidden":
-                    try:
-                        del parent[loc[-1]]
-                    except (KeyError, IndexError, TypeError):
-                        continue
-                    report.fields_dropped += 1
-                    progressed = True
-                elif kind in ("literal_error", "enum", "missing") or kind.startswith("enum"):
-                    # Remove the record that carries the bad value, not the field:
-                    # a belief with no state is not a belief, and an event with no
-                    # summary is a stub the graph has no use for.
-                    for depth in range(len(loc) - 1, 0, -1):
-                        holder, key = _walk(data, loc[:depth]), loc[depth - 1]
-                        if isinstance(holder, list) and isinstance(key, int):
-                            del holder[key]
-                            report.records_salvaged += 1
-                            progressed = True
-                            break
-                    else:
-                        continue
-                if progressed:
-                    break
-            if not progressed:
-                raise
-    report.errors.append(f"{where}: salvage gave up after 60 repairs")
-    raise ValidationError.from_exception_data(schema.__name__, [])
 
 
 def _custom_id(pass_name: str, scene_id: str) -> str:

@@ -59,25 +59,37 @@ from .textstats import estimate_tokens
 #: this shape of prompt — a long list of short, id-heavy lines, where the real
 #: tokenizer gets far less mileage per character than it does on prose.
 #:
-#: 2.3 was fitted against the pilot with output folded in, and book one then
-#: came in at $4.71 against its $3.58 prediction. Decomposing that bill:
-#: $0.17 of it was output (see `_OUTPUT_TOKENS_PER_CALL`, now priced on its
-#: own), leaving $4.54 of input against 780,270 predicted tokens at sonnet's
-#: $2/Mtok — an undercount of 2.91x on the input term alone.
+#: Fitted against book one's instrumented re-run: 780,270 tokens predicted by
+#: `candidate_index`, 976,483 actually billed as input. 2.3 and then 2.91 were
+#: both fitted with output folded in or mis-measured, and both were far too
+#: high once output was counted properly.
 #:
-#: This number is an empirical fit, not an explanation: it says how far the
-#: estimate lands from the bill, not why. The why needs a run's real token
-#: counts next to its real prompts, which is what `SettleReport.calibration`
-#: now preserves and what book one did not. Re-fit it from that, and re-fit it
-#: whenever the prompt shape changes.
-_ESTIMATE_SLACK = 2.91
+#: CAREFUL, this is the ratio that is easy to get wrong. It converts
+#: `IndexReport.prompt_tokens` into billed input. `SettleReport.calibration`
+#: reports a *different* ratio — 1.56 on the same run — because it compares
+#: against the run's own per-call estimate, which includes the system block and
+#: which shrinks as the run closes promises and drops them from later listings.
+#: Refitting this constant from that number over-predicts by 25%.
+#:
+#: An empirical fit, not an explanation: it says how far the estimate lands
+#: from the bill, not why. Refit whenever the prompt shape changes.
+_ESTIMATE_SLACK = 1.25
 
-#: Measured off book one's 210 emitted closes: a promise id, a verbatim quote,
-#: a sentence of reasoning and a confidence, ~105 tokens per call averaged over
-#: 159 calls. It is small — 3.5% of that run — but it bills at five times the
-#: input rate on every model in the table, and it grows with candidate density,
-#: so books four and five will carry more of it per call than book one did.
-_OUTPUT_TOKENS_PER_CALL = 105
+#: Measured: 180,308 output tokens over 162 calls on book one's re-run.
+#:
+#: The previous value here was 105, derived by reconstructing the emitted JSON
+#: from the saved close fields. That method was wrong by a factor of ten — the
+#: real tool-use output is far larger than the fields that survive into the
+#: report — and it made output look like a 3.5% rounding term. It is 48% of the
+#: bill. At five times the input rate, an input-only cost model cannot converge
+#: on this workload no matter what scalar is fitted to it.
+#:
+#: One data point, and the weakest part of the estimate. Book one averages 91
+#: candidates per scene; book five averages 675, and if output grows with
+#: candidate density rather than staying flat per call, the later books cost
+#: more than this predicts. Two instrumented books would settle it; until then
+#: treat book four and five's figures as a floor.
+_OUTPUT_TOKENS_PER_CALL = 1_113
 
 
 @dataclass
@@ -358,6 +370,28 @@ class SettleReport:
     #: so the comparison is like-for-like rather than against a whole-corpus
     #: figure that included scenes the run skipped.
     estimated_input_tokens: int = 0
+    #: (candidates offered, output tokens emitted) per call. Output is half the
+    #: bill and the cost model treats it as flat per call, fitted to book one at
+    #: 91 candidates per scene. Book five averages 675. If output instead grows
+    #: with the listing, every later book costs more than projected and the
+    #: error compounds in the direction that overruns a budget. One run cannot
+    #: tell the two apart; this makes the next one able to.
+    output_by_candidates: list[tuple[int, int]] = field(default_factory=list)
+
+    def output_scaling(self) -> str:
+        """Does output grow with the candidate list, or is it flat per call?"""
+        pts = [p for p in self.output_by_candidates if p[0] > 0]
+        if len(pts) < 8:
+            return ""
+        pts.sort()
+        half = len(pts) // 2
+        lo = statistics.mean(o for _, o in pts[:half])
+        hi = statistics.mean(o for _, o in pts[-half:])
+        lo_c = statistics.mean(c for c, _ in pts[:half])
+        hi_c = statistics.mean(c for c, _ in pts[-half:])
+        return (f"output vs candidates: {lo_c:.0f} candidates -> {lo:,.0f} output tokens, "
+                f"{hi_c:.0f} -> {hi:,.0f} ({hi / max(1.0, lo):.2f}x for "
+                f"{hi_c / max(1.0, lo_c):.1f}x the listing)")
 
     def calibration(self) -> str:
         """How far the estimate ran from the bill, term by term."""
@@ -416,6 +450,8 @@ class SettleReport:
         ]
         if (cal := self.calibration()):
             lines.append(cal)
+        if (scale := self.output_scaling()):
+            lines.append(scale)
         # The rejected quote is the interesting one: a model that paraphrases
         # instead of copying looks identical to one that invents, and only the
         # text tells them apart.
@@ -529,6 +565,7 @@ def settle(
         # Counted here rather than taken from the index, because this is the
         # string that is actually sent — system prompt and schema included.
         report.estimated_input_tokens += estimate_tokens(SETTLE_SYSTEM) + estimate_tokens(prompt)
+        before_out = usage.output_tokens
         try:
             out = structured(client, model, _Settlement, system=SETTLE_SYSTEM, prompt=prompt,
                              max_tokens=4_000, usage=usage, stage="settle")
@@ -536,6 +573,7 @@ def settle(
             report.errors.append(f"{scene['scene_id']}: {type(exc).__name__}: {exc}")
             continue
         report.scenes_read += 1
+        report.output_by_candidates.append((len(candidates), usage.output_tokens - before_out))
 
         scene_norm = _norm(scene["text"])
         for c in out.closes:

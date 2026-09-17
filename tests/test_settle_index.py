@@ -348,14 +348,20 @@ def test_output_tokens_are_priced_at_the_output_rate():
 
 
 def test_the_estimate_reproduces_the_one_run_that_was_actually_billed():
-    """Book one: 159 scenes, 780,270 predicted input tokens on sonnet, and a
-    real invoice of $4.71. The constants are fitted to exactly this point, so
-    if a later change moves the prediction off it, the change either found a
-    better model of the cost — and should re-fit — or broke this one."""
+    """Book one, instrumented: 780,270 predicted input tokens, 976,483 billed,
+    180,308 output over 162 calls on sonnet, invoice $3.76. The constants are
+    fitted to exactly this point, so if a later change moves the prediction off
+    it, the change either found a better model of the cost — and should re-fit —
+    or broke this one.
+
+    The first version of this test pinned $4.71, from the run before output was
+    measured properly. Both the input slack and the output term were wrong then,
+    in opposite directions, which is how the total looked close enough to trust.
+    """
     from bp.settle import IndexReport
 
     rep = IndexReport(scenes=159, prompt_tokens=780_270)
-    assert rep.cost_usd(2.0, 10.0, batch=False) == pytest.approx(4.71, abs=0.05)
+    assert rep.cost_usd(2.0, 10.0, batch=False) == pytest.approx(3.76, abs=0.10)
     # and the batch price is half of it, not half of some other arithmetic
     assert rep.cost_usd(2.0, 10.0, batch=True) == pytest.approx(
         rep.cost_usd(2.0, 10.0, batch=False) / 2)

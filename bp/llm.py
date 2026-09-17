@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence, Type, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .errors import NoCredentials, NoStructuredOutput, Refused
 from .textstats import estimate_tokens
@@ -269,6 +269,97 @@ def _strict_schema(schema: dict) -> dict:
 
 
 # ------------------------------------------------------------------ structured
+def _walk(data, loc):
+    """The container holding ``loc[-1]``, or None if the path does not exist."""
+    node = data
+    for key in loc[:-1]:
+        try:
+            node = node[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+    return node
+
+
+def _salvage(schema, data, report, where: str):
+    """Validate a payload, losing the bad record instead of the whole call.
+
+    `report` is anything carrying the counters this touches — `unwrapped_json`,
+    `fields_dropped`, `records_salvaged` and `errors`. It lives here rather than
+    in the extractor because the extractor is not the only caller that can lose
+    a whole scene to one malformed field: settling lost book 1.58.1 to a model
+    that serialised its list as a string, which is the first repair below and
+    was already solved here.
+
+    ``extra="forbid"`` is deliberate — it is what stops the extraction schema and
+    the table schema drifting apart unnoticed — but combined with whole-payload
+    validation it means one invented field costs a scene every record it had.
+    So keep the strictness and narrow the blast radius: drop the unknown field,
+    drop the record whose enum is outside the vocabulary, and validate again.
+
+    An enum is never guessed. A belief that arrives as ``believes`` could mean
+    ``knows`` or ``believes_false``, and those are opposites to the epistemic
+    checker, so the record goes rather than the polarity being invented.
+    """
+    for _ in range(60):
+        try:
+            return schema.model_validate(data)
+        except ValidationError as exc:
+            progressed = False
+            for err in exc.errors():
+                loc, kind = list(err["loc"]), err["type"]
+                if not loc:
+                    continue
+                parent = _walk(data, loc)
+                if parent is None:
+                    continue
+                if kind in ("list_type", "dict_type") and isinstance(err.get("input"), str):
+                    # The tool call arrived with its array serialised as a string
+                    # rather than as JSON. The records are all there; they are one
+                    # json.loads away from being usable.
+                    try:
+                        parent[loc[-1]] = json.loads(err["input"])
+                    except (ValueError, KeyError, IndexError, TypeError):
+                        continue
+                    report.unwrapped_json += 1
+                    progressed = True
+                elif kind == "list_type" and isinstance(err.get("input"), dict):
+                    # The ledger pass sometimes wraps each list in a second copy
+                    # of its own key: {"objects": {"objects": [...]}}. The records
+                    # are intact one level down.
+                    inner = err["input"].get(loc[-1])
+                    if not isinstance(inner, list):
+                        continue
+                    parent[loc[-1]] = inner
+                    report.unwrapped_json += 1
+                    progressed = True
+                elif kind == "extra_forbidden":
+                    try:
+                        del parent[loc[-1]]
+                    except (KeyError, IndexError, TypeError):
+                        continue
+                    report.fields_dropped += 1
+                    progressed = True
+                elif kind in ("literal_error", "enum", "missing") or kind.startswith("enum"):
+                    # Remove the record that carries the bad value, not the field:
+                    # a belief with no state is not a belief, and an event with no
+                    # summary is a stub the graph has no use for.
+                    for depth in range(len(loc) - 1, 0, -1):
+                        holder, key = _walk(data, loc[:depth]), loc[depth - 1]
+                        if isinstance(holder, list) and isinstance(key, int):
+                            del holder[key]
+                            report.records_salvaged += 1
+                            progressed = True
+                            break
+                    else:
+                        continue
+                if progressed:
+                    break
+            if not progressed:
+                raise
+    report.errors.append(f"{where}: salvage gave up after 60 repairs")
+    raise ValidationError.from_exception_data(schema.__name__, [])
+
+
 def structured(
     client,
     model: str,
@@ -399,7 +490,21 @@ def structured(
             f"(stop_reason={getattr(msg, 'stop_reason', '?')!r})"
             + (f" — said: {detail[:200]!r}" if detail else "")
         )
-    return schema.model_validate(payload)
+    # Salvage rather than lose the call. Settling lost book 1.58.1 outright to a
+    # model that serialised its list as a string — a repair the extractor has
+    # done for a long time, which settling never inherited because it goes
+    # through here and the repair lived over there.
+    return _salvage(schema, payload, _SalvageCounts(), stage or schema.__name__)
+
+
+@dataclass
+class _SalvageCounts:
+    """Somewhere for `_salvage` to put its tallies when the caller keeps none."""
+
+    unwrapped_json: int = 0
+    fields_dropped: int = 0
+    records_salvaged: int = 0
+    errors: list[str] = field(default_factory=list)
 
 
 def structured_many(
