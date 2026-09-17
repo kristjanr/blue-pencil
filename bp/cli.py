@@ -653,6 +653,27 @@ def cmd_graph(args) -> int:
     return 0
 
 
+def cmd_export(args) -> int:
+    """Write the entity/relationship view out for a consumer outside `bp`."""
+    from .export import write_export
+
+    ws = Workspace.find()
+    profile = ws.load_profile(args.profile)
+    graph = ws.open_graph(profile, db=args.db)
+    try:
+        written, check = write_export(graph, args.out, profile)
+    finally:
+        graph.close()
+
+    for name, path in written.items():
+        _echo(f"  {name:14} {path.stat().st_size / 1e6:>6.1f} MB  {path}")
+    _echo(f"  no verbatim book text: {check.probes} probes of scene prose and "
+          f"citation quotes, none found in the export")
+    if not check.probes:
+        _echo("  WARNING: the check ran no probes, so it proved nothing")
+    return 0
+
+
 def cmd_cost(args) -> int:
     """Estimate a run before paying for it."""
     from .llm import RATES
@@ -922,6 +943,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--character", default=None)
     sp.add_argument("--status", default=None)
     sp.set_defaults(func=cmd_graph)
+
+    sp = sub.add_parser("export", help="entities + derived relationships as JSON, for a viewer")
+    common(sp)
+    sp.add_argument("--out", default="export", help="directory to write graph.json and detail.json into")
+    sp.set_defaults(func=cmd_export)
 
     sp = sub.add_parser("cost", help="estimate a run before paying for it")
     sp.add_argument("--corpus-tokens", type=float, default=700_000)
