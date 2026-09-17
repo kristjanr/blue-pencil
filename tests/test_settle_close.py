@@ -151,6 +151,31 @@ def test_a_paid_in_naming_no_scene_is_not_silently_skipped(world):
     assert [p for p, _s in audit.scene_missing] == ["P-1"]
 
 
+def test_a_pass_says_which_books_its_evidence_came_from(world):
+    """A clean result is only clean about the ground it covered.
+
+    The real ledger holds 354 of its 358 quotes in books 1 and 2, and four
+    across books 3-5. Reading that pass as clearing a hazard in book 5 is the
+    house bug wearing a green check: no evidence there for the check to fail
+    on. The total invites the mistake, so the distribution is printed with it.
+    """
+    graph, _ = world
+    scenes = graph.scenes()
+    books = {s.book_id for s in scenes}
+    assert len(books) > 1, "the fixture needs two books for this to mean anything"
+
+    lopsided = sorted(books)[0]
+    for i, scene in enumerate(s for s in scenes if s.book_id == lopsided):
+        _promise(graph, [scene.scene_id], f"P-{i}")
+        _paid_by_hand(graph, f"P-{i}", scene.scene_id, scene.text[:60])
+
+    audit = audit_paid_promises(graph)
+    assert audit.failures == 0
+    assert set(audit.by_book) == {lopsided}, "every quote sits in the one book"
+    rendered = audit.render()
+    assert f"{lopsided} {audit.paid}" in rendered, "the pass must say where it looked"
+
+
 def test_a_ledger_with_nothing_paid_does_not_report_clean(world):
     """The house bug: every clause passes because nothing was examined."""
     graph, _ = world

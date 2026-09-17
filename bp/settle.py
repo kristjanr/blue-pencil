@@ -133,9 +133,21 @@ class LedgerAudit:
     out from under it leaves a close whose evidence no longer exists. The
     drop-cap fix edited the opening line of hundreds of scenes and nobody
     checked. That failure is invisible from every other angle.
+
+    Which is why the pass reports *where the evidence it checked lives*, not
+    just how much of it there was. Books 1 and 2 hold 354 of the 358 quotes in
+    the ledger; books 3, 4 and 5 hold four between them. A clean result is
+    therefore nearly silent about the drop-cap repair, which touched 24 book 5
+    scenes — and reading it as clearing that question is this project's own bug
+    in its most flattering costume, a green check taken as evidence about a
+    case it never covered. The count alone invites that reading. The
+    distribution makes it obvious.
     """
 
     paid: int = 0
+    #: book -> paid promises whose evidence sits in that book. Coverage, not a
+    #: statistic: it is what says which question a pass has actually answered.
+    by_book: dict[str, int] = field(default_factory=dict)
     no_scene: list[str] = field(default_factory=list)
     scene_missing: list[tuple[str, str]] = field(default_factory=list)
     no_quote: list[str] = field(default_factory=list)
@@ -154,7 +166,8 @@ class LedgerAudit:
         if not self.paid:
             return "ledger audit: no paid promises to check — this is not a pass"
         if not self.failures:
-            return f"ledger audit: {self.paid:,} paid promises, all three invariants hold"
+            return (f"ledger audit: {self.paid:,} paid promises, all three invariants hold"
+                    + self._coverage())
         lines = [f"LEDGER AUDIT FAILED: {self.failures} of {self.paid:,} paid promises"]
         for label, bad in (("no paid_in", self.no_scene),
                            ("paid_in names no scene", self.scene_missing),
@@ -164,7 +177,24 @@ class LedgerAudit:
             if bad:
                 shown = [b[0] if isinstance(b, tuple) else b for b in bad[:5]]
                 lines.append(f"  {label}: {len(bad)} ({', '.join(shown)})")
-        return "\n".join(lines)
+        return "\n".join(lines) + self._coverage()
+
+    def _coverage(self) -> str:
+        """Which books the checked evidence sits in — what the pass covers.
+
+        A lopsided distribution is the interesting case, so it is called out
+        rather than left to be noticed: a book holding almost no quotes has not
+        been audited in any useful sense, whatever the total says.
+        """
+        if not self.by_book:
+            return ""
+        counts = sorted(self.by_book.items())
+        line = "\n  evidence checked sits in: " + ", ".join(f"{b} {n}" for b, n in counts)
+        thin = [b for b, n in counts if n < max(5, self.paid // 20)]
+        if thin and len(thin) < len(counts):
+            line += (f"\n  — a pass says little about {', '.join(thin)}: "
+                     f"almost no evidence there to check")
+        return line
 
 
 def audit_paid_promises(graph: Graph) -> LedgerAudit:
@@ -183,11 +213,15 @@ def audit_paid_promises(graph: Graph) -> LedgerAudit:
         scenes = {r["scene_id"]: r["text"] for r in graph.conn.execute(
             f"SELECT scene_id, text FROM scenes WHERE scene_id IN ({qs})", tuple(wanted))}
     normed = {sid: _norm(text) for sid, text in scenes.items()}
+    book_of = {r["scene_id"]: r["book_id"] for r in graph.conn.execute(
+        "SELECT scene_id, book_id FROM scenes")}
     with_trail = {r[0] for r in graph.conn.execute(
         "SELECT DISTINCT record_id FROM record_changes WHERE table_name='promises'")}
 
     for row in rows:
         pid, sid, quote = row["promise_id"], row["paid_in"], row["paid_quote"] or ""
+        if (book := book_of.get(sid)):
+            audit.by_book[book] = audit.by_book.get(book, 0) + 1
         if pid not in with_trail:
             audit.no_trail.append(pid)
         if not sid:
