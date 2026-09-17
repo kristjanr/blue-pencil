@@ -168,12 +168,9 @@ ul.tight li{margin-bottom:6px;color:var(--ink2);font-size:14px}
 <header class="top">
   <span class="eyebrow">Blue Pencil · extraction viewer</span>
   <h1>Bobiverse Story Graph</h1>
-  <p class="lede">2,095 entities and 4,953 derived relationships pulled out of five novels — drawn five ways, because the structure underneath is five different shapes.</p>
-  <div class="provenance">
-    <span><b>source</b> graph/bobiverse.sqlite</span>
+  <p class="lede" id="lede">Entities and derived relationships pulled out of the corpus — drawn five ways, because the structure underneath is five different shapes.</p>
+  <div class="provenance" id="prov">
     <span><b>via</b> bp export · bp/export.py</span>
-    <span><b>scenes</b> 836</span>
-    <span><b>books</b> 5</span>
     <span><b>no book text</b> structure and paraphrase only</span>
   </div>
 </header>
@@ -206,6 +203,12 @@ ul.tight li{margin-bottom:6px;color:var(--ink2);font-size:14px}
     </div>
   </div>
   <div class="hides" id="cov-hides"></div>
+  <div class="panel" id="chan-panel" style="margin-top:16px" hidden>
+    <h3>What carried the message</h3>
+    <p style="font-size:13.5px;color:var(--ink2);margin-top:6px" id="chan-note"></p>
+    <div id="chan-bars" style="margin-top:12px"></div>
+    <div class="hides" style="margin-top:12px" id="chan-hides"></div>
+  </div>
   <div class="grid2" style="margin-top:16px">
     <div class="panel">
       <h3>Resolved to nothing</h3>
@@ -247,7 +250,7 @@ ul.tight li{margin-bottom:6px;color:var(--ink2);font-size:14px}
 <section class="view" id="v-lineage" role="tabpanel" aria-labelledby="tab-lineage" hidden>
   <div class="viewhead">
     <h2>The replicant lineage</h2>
-    <p>Ninety <code>forked_from</code> edges — a copy pointing back at the mind it diverged from. The only edge kind the database states outright rather than having inferred from co-occurrence, which makes it the one spine here that needs no tie-break.</p>
+    <p id="lin-intro">A copy pointing back at the mind it diverged from. The only edge kind the database states outright rather than inferring from co-occurrence, which makes it the one spine here that needs no tie-break.</p>
   </div>
   <div class="panel plot"><figure style="margin:0"><svg id="lineage" viewBox="0 0 900 520" role="img" aria-label="Forest of replicant fork lineages"></svg></figure></div>
   <div class="hides" id="lin-hides"></div>
@@ -257,7 +260,7 @@ ul.tight li{margin-bottom:6px;color:var(--ink2);font-size:14px}
 <section class="view" id="v-promises" role="tabpanel" aria-labelledby="tab-promises" hidden>
   <div class="viewhead">
     <h2>What the text promised, and where it paid</h2>
-    <p>Every promise is planted somewhere on the 836-scene spine. An arc lands where it was paid off; a stem that rises and stops is a setup still owed.</p>
+    <p id="pro-intro">Every promise is planted somewhere on the scene spine. An arc lands where it was paid off; a stem that rises and stops is a setup still owed.</p>
   </div>
   <div class="controls">
     <label class="ctl-lab" for="pweight">minimum weight</label>
@@ -292,6 +295,7 @@ ul.tight li{margin-bottom:6px;color:var(--ink2);font-size:14px}
     <li><b>Nothing here is a fact the database stated.</b> The <code>relationships</code> table is empty; every edge is derived, and <code>edge_kinds</code> in the export records how each one was built.</li>
     <li><b>An <span class="flag inf">inf</span> record was concluded by a model</b>, not read off the page; <span class="flag dis">dis</span> is disputed. They are drawn lighter and dashed, never like an explicit claim.</li>
     <li><b>Events carry a day range, not a date.</b> Where a span is drawn it is <code>day_lo</code>–<code>day_hi</code>; a point would invent precision the extractor never claimed.</li>
+    <li><b>An <code>informed</code> edge is one hop, not an answer.</b> It says a message was sent, and where a declared channel gives it a speed, when it arrived. Whether someone could <em>know</em> a thing by a date is derived from those hops plus fork inheritance and channel windows — <code>bp viz</code> answers that against the database.</li>
     <li><b>No scene prose and no citation quotes are in this page</b>, by design — so a claim can be traced to a scene id here, but the check of whether the quote supports it has to happen against the database.</li>
   </ul>
 </section>
@@ -380,6 +384,25 @@ function bars(node,rows,colorFn){
 }
 function drawCoverage(){
   const c=G.counts, dq=G.data_quality;
+  // Nothing about the corpus is written into this page. A viewer that hardcodes
+  // a count from the snapshot it was built against starts lying at the next
+  // export, and looks confident while doing it.
+  document.getElementById("lede").textContent=
+    `${fmt(c.entities)} entities and ${fmt(c.edges)} derived relationships pulled out of `
+    +`${fmt(G.books.length)} book${G.books.length===1?"":"s"} — drawn five ways, because the structure underneath is five different shapes.`;
+  document.getElementById("prov").innerHTML=
+    `<span><b>source</b> ${esc(String((G.source&&G.source.database)||"the graph").split("/").pop())}</span>`
+    +`<span><b>via</b> ${esc((G.source&&G.source.generated_by)||"bp export")}</span>`
+    +`<span><b>scenes</b> ${fmt(c.scenes)}</span><span><b>books</b> ${fmt(G.books.length)}</span>`
+    +`<span><b>no book text</b> structure and paraphrase only</span>`;
+  const nForks=(c.edges_by_kind||{}).forked_from||0;
+  document.getElementById("lin-intro").textContent=
+    `${fmt(nForks)} forked_from edges — a copy pointing back at the mind it diverged from. `
+    +`The only edge kind the database states outright rather than inferring from co-occurrence, which makes it the one spine here that needs no tie-break.`;
+  document.getElementById("pro-intro").textContent=
+    `Every promise is planted somewhere on the ${fmt(c.scenes)}-scene spine. `
+    +`An arc lands where it was paid off; a stem that rises and stops is a setup still owed.`;
+  drawChannels();
   const inferred=G.entities.filter(e=>e.claim_type!=="explicit").length;
   document.getElementById("cov-tiles").innerHTML=[
     [fmt(c.entities),"entities",`${fmt(c.isolated_entities)} with no edge at all`],
@@ -414,6 +437,26 @@ function drawCoverage(){
     return `<tr><td class="mono">${esc(name)}</td><td><span class="mono">${esc(winner)}</span>${chosen?`<br><span style="font-size:12px;color:var(--muted)">${esc(chosen.name)}</span>`:""}</td><td class="r">${fmt(counts.get(name)||0)}</td><td class="mono" style="font-size:11.5px;color:var(--muted)">${cands.filter(x=>x!==winner).map(esc).join(", ")}</td></tr>`;
   });
   document.querySelector("#ambig-table tbody").innerHTML=rows.join("");
+}
+
+function drawChannels(){
+  const ch=(G.data_quality||{}).channels;
+  const panel=document.getElementById("chan-panel");
+  if(!ch){panel.hidden=true;return;}
+  panel.hidden=false;
+  document.getElementById("chan-note").textContent=ch.note||"";
+  const rows=[["declared",ch.matched_a_declared_channel||0],
+              ["undeclared",ch.no_declared_channel||0]];
+  bars(document.getElementById("chan-bars"),rows,k=>cssv(k==="declared"?"--accent":"--warning"));
+  const top=(ch.top_undeclared||[]).slice(0,6).map(([n,k])=>`${esc(n)} ×${fmt(k)}`).join(", ");
+  // The hops actually drawable as edges, against the hops that exist.
+  const informedHops=G.edges.filter(e=>e.kind==="informed").reduce((a,e)=>a+e.count,0);
+  const reports=(G.counts||{}).reports||0;
+  document.getElementById("chan-hides").innerHTML=
+    `<span><b>A report with no declared channel is a real hop of unknown duration — not an instant one, and not an absent one.</b>
+     ${ch.distinct_raw_channels?`The column is free text with ${fmt(ch.distinct_raw_channels)} distinct spellings (${top}), so only the ${fmt((ch.declared||[]).length)} the profile declares (${(ch.declared||[]).map(esc).join(", ")}) carry a speed, and only a speed makes an arrival computable. `:""}
+     ${reports&&informedHops?`${fmt(informedHops)} of ${fmt(reports)} hops resolve both endpoints into entities; the rest are mostly broadcasts to a crowd, which have no single recipient to draw an arrow at. `:""}
+     Whether a given character could know by a given date is <em>derived</em>, not stored — that question needs <code>bp viz</code> against the database, not this page.</span>`;
 }
 
 /* ---------- shapes: the secondary channel, so kind never rests on hue ---------- */
@@ -716,7 +759,7 @@ function drawArcs(){
   document.getElementById("arc-legend").innerHTML=
     `<span class="chip"><svg width="22" height="12" aria-hidden="true"><path d="M2,10 C2,1 20,1 20,10" fill="none" stroke="${cssv("--good")}" stroke-width="2"/></svg>paid — an arc that lands</span>`+
     `<span class="chip"><svg width="14" height="14" aria-hidden="true"><line x1="7" y1="13" x2="7" y2="2" stroke="${cssv("--accent")}" stroke-width="1.5"/></svg>open — planted, still owed</span>`+
-    `<span class="chip"><span class="dot" style="background:var(--nonphoto)"></span>the 836-scene spine, by book</span>`;
+    `<span class="chip"><span class="dot" style="background:var(--nonphoto)"></span>the ${fmt(G.counts.scenes)}-scene spine, by book</span>`;
   const bk=new Map(G.scenes.map(s=>[s.scene_id,s.book_id]));
   const paidBook={};
   for(const p of D.promises) if(p.status==="paid"&&bk.has(p.paid_in)) paidBook[bk.get(p.paid_in)]=(paidBook[bk.get(p.paid_in)]||0)+1;
