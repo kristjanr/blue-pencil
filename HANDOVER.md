@@ -255,6 +255,30 @@ Two lessons from the Linux transcription that must carry over:
 5. **Score it**: `bp backtest --profile bobiverse --hide "book 6"`, Tiers A/B/C.
 6. **Then book 7**, with as much human involvement as he wants.
 
+### Handing the graph to something that is not `bp`
+
+`bp export --profile bobiverse --out ./export` writes `graph.json` (entities,
+the derived edge list, books, scene metadata, threads, objects) and
+`detail.json` (events, the causal chain, beliefs, promises, the citation
+index). Anything building a viewer should run this rather than open the SQLite
+file, for three reasons the schema does not advertise:
+
+- **The `relationships` table is empty and nothing writes it.** Relationships
+  are implicit — `entities.parent_id`, event participation, `observed_by`,
+  thread membership. `bp/export.py` derives them into one typed edge list,
+  4,953 edges weighted by how many events or threads produced each.
+- **Entity references are not consistently entity ids.** One column holds ids,
+  display names and aliases interchangeably. The resolver folds all three; what
+  it still cannot resolve is listed in `data_quality`, not dropped silently.
+- **No book text leaves in it**, and that is checked rather than asserted:
+  slices of real scene prose and citation quotes are searched for in the
+  serialised bytes before anything is written, and the check reports how many
+  probes it ran so a clean result cannot mean it looked at nothing.
+
+The viewer handover page — data model, derivation, caveats, live browser — is
+published at <https://claude.ai/artifact/YHyo9cQrXocBtx6fdkmkDk> with both JSON
+files attached.
+
 ## 7. Open gaps
 
 - 20 scenes still have no POV; 319 unplaced. Parsing/data tails.
