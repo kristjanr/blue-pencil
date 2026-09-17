@@ -55,41 +55,65 @@ from .profile import SeriesProfile
 from .textstats import estimate_tokens
 
 
-#: `estimate_tokens` is a chars-to-tokens approximation and it runs light on
-#: this shape of prompt — a long list of short, id-heavy lines, where the real
-#: tokenizer gets far less mileage per character than it does on prose.
+#: Billed tokens per settling call, as a function of how many candidate
+#: promises that call's listing carries. Two books have now been instrumented
+#: end to end, which is what it took to see the shape:
 #:
-#: Fitted against book one's instrumented re-run: 780,270 tokens predicted by
-#: `candidate_index`, 976,483 actually billed as input. 2.3 and then 2.91 were
-#: both fitted with output folded in or mis-measured, and both were far too
-#: high once output was counted properly.
+#:     book 1   51 candidates/scene   162 calls    976,483 in   180,308 out
+#:     book 2  183 candidates/scene   166 calls  2,420,889 in   367,559 out
 #:
-#: CAREFUL, this is the ratio that is easy to get wrong. It converts
-#: `IndexReport.prompt_tokens` into billed input. `SettleReport.calibration`
-#: reports a *different* ratio — 1.56 on the same run — because it compares
-#: against the run's own per-call estimate, which includes the system block and
-#: which shrinks as the run closes promises and drops them from later listings.
-#: Refitting this constant from that number over-predicts by 25%.
+#: At sonnet-5's $2/$10 those reproduce the invoices to the cent — $3.76 and
+#: $8.52 — so the fit below is against the bill itself, not against an estimate
+#: of it.
 #:
-#: An empirical fit, not an explanation: it says how far the estimate lands
-#: from the bill, not why. Refit whenever the prompt shape changes.
-_ESTIMATE_SLACK = 1.25
+#: **The estimator is no longer in the cost path, and that is the point.** The
+#: old model priced `estimate_tokens(prompt) * a scalar`, which meant every
+#: tokenizer quirk had to be absorbed by one constant fitted on one book. That
+#: constant read 1.25 against book one and 1.75 against book two: not a
+#: constant. Cost is now predicted from candidate density directly, and the
+#: estimate is kept only to describe the work.
+#:
+#: Input is linear in density with a positive intercept, because that is what a
+#: call is: a fixed system block plus the scene's prose, then a listing that
+#: grows one line per candidate. The intercept is that fixed part.
+#:
+#: This is the correction that matters for the tail. Fitting the *ratio* of
+#: bill to estimate as a power law — the obvious move with two points — makes
+#: billed input grow as roughly d^1.15, which has no mechanism behind it: it
+#: would require each listing line to cost more tokens as the list gets longer.
+#: Extrapolated to book five that difference is about $15.
+_BILLED_IN_BASE = 2_722.0          #: system block + scene prose, per call
+_BILLED_IN_PER_CANDIDATE = 64.82   #: one listing line, as billed
 
-#: Measured: 180,308 output tokens over 162 calls on book one's re-run.
+#: Output is sub-linear: the model writes about the few promises it closes, and
+#: closes do not scale with the size of the list it was offered.
 #:
-#: The previous value here was 105, derived by reconstructing the emitted JSON
-#: from the saved close fields. That method was wrong by a factor of ten — the
-#: real tool-use output is far larger than the fields that survive into the
-#: report — and it made output look like a 3.5% rounding term. It is 48% of the
-#: bill. At five times the input rate, an input-only cost model cannot converge
-#: on this workload no matter what scalar is fitted to it.
+#: The exponent is the one number here with independent support. Fitted across
+#: the two books it is 0.538; fitted *within* book two alone — 108 candidates
+#: producing 1,825 output tokens, 201 producing 2,559 — it is 0.545. Two
+#: derivations that share no data agreeing to 1.5% is the only real validation
+#: in this module, and it is why the tail projection is worth trusting at all.
 #:
-#: One data point, and the weakest part of the estimate. Book one averages 91
-#: candidates per scene; book five averages 675, and if output grows with
-#: candidate density rather than staying flat per call, the later books cost
-#: more than this predicts. Two instrumented books would settle it; until then
-#: treat book four and five's figures as a floor.
-_OUTPUT_TOKENS_PER_CALL = 1_113
+#: The old flat 1,113 tokens per call was book one's average read as a
+#: constant. It is book five's figure that it gets wrong: at 574 candidates the
+#: flat value under-predicts output by a factor of three.
+_BILLED_OUT_COEF = 134.0
+_BILLED_OUT_EXP = 0.538
+
+
+def billed_tokens_per_call(candidates: float) -> tuple[float, float]:
+    """(input, output) tokens one settling call bills at this listing size.
+
+    Both halves are two-parameter fits through two points, so they reproduce
+    those two books exactly and nothing else is validated. Treat a projection
+    more than a book or two beyond book five as a shape, not a number, and
+    re-fit from `SettleReport.calibration` whenever another book is billed.
+    """
+    d = max(0.0, float(candidates))
+    if not d:
+        return _BILLED_IN_BASE, 0.0
+    return (_BILLED_IN_BASE + _BILLED_IN_PER_CANDIDATE * d,
+            _BILLED_OUT_COEF * d ** _BILLED_OUT_EXP)
 
 
 @dataclass
@@ -125,12 +149,29 @@ class IndexReport:
         correction silently moved whenever the *shape* of the answer changed,
         which is not something a cost model should do quietly.
 
+        Priced per book and summed, never from the corpus average. Output is
+        concave in candidate density, so averaging 49 candidates/scene and 574
+        into one figure of 300 and pricing that once over-quotes — the safe
+        direction, but a different number from the one the per-book table
+        prints, and the two should not silently disagree.
+
         `rate_out` is optional only so old callers keep working; pass it.
         """
-        calls = self.scenes if calls is None else calls
-        usd = self.prompt_tokens / 1_000_000 * rate_in * _ESTIMATE_SLACK
-        if rate_out is not None:
-            usd += calls * _OUTPUT_TOKENS_PER_CALL / 1_000_000 * rate_out
+        # book -> (calls, candidates per scene); the whole report is one
+        # unlabelled slice when nothing has told us the book boundaries.
+        slices = ([(n, pairs / n if n else 0) for n, pairs, _ in self.by_book.values()]
+                  if self.by_book else
+                  [(self.scenes, self.pairs / self.scenes if self.scenes else 0)])
+        if calls is not None:                     # pricing a subset of one shape
+            density = slices[0][1] if len(slices) == 1 else self.pairs / max(self.scenes, 1)
+            slices = [(calls, density)]
+
+        usd = 0.0
+        for n, density in slices:
+            tok_in, tok_out = billed_tokens_per_call(density)
+            usd += n * tok_in / 1_000_000 * rate_in
+            if rate_out is not None:
+                usd += n * tok_out / 1_000_000 * rate_out
         return usd * 0.5 if batch else usd
 
     def render(self) -> str:
@@ -146,9 +187,10 @@ class IndexReport:
             f"promises owed to nobody resolvable (over-included, never dropped): {self.unowned:,}",
             "",
             f"one pass = {self.scenes:,} calls · {self.prompt_tokens:,} estimated input tokens "
-            f"+ ~{self.scenes * _OUTPUT_TOKENS_PER_CALL:,} output",
-            f"input carries the measured {_ESTIMATE_SLACK}x correction; output is priced "
-            f"separately at its own rate. Both are fits against book one, not guarantees:",
+            f"(a description of the work; the price below does not use it)",
+            "priced from candidate density against two instrumented books, "
+            "per book and summed — books 1 and 2 reproduce to the cent, the "
+            "rest is extrapolation:",
         ]
         for model in ("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"):
             r_in, r_out = rate_for(model)
@@ -159,10 +201,10 @@ class IndexReport:
             r_in, r_out = rate_for(judge)
             lines += ["", f"per book ({judge}, live) — promises accumulate, "
                           "so these are not equal:"]
-            for book, (n, pairs, tokens) in sorted(self.by_book.items()):
+            for book, (n, pairs, _tokens) in sorted(self.by_book.items()):
                 per = pairs / n if n else 0
-                usd = (tokens / 1e6 * r_in * _ESTIMATE_SLACK
-                       + n * _OUTPUT_TOKENS_PER_CALL / 1e6 * r_out)
+                tok_in, tok_out = billed_tokens_per_call(per)
+                usd = n * (tok_in / 1e6 * r_in + tok_out / 1e6 * r_out)
                 lines.append(f"  {book:12} {n:4} scenes · {per:6.0f} candidates/scene · "
                              f"${usd:>6,.2f}")
         return "\n".join(lines)
@@ -547,13 +589,13 @@ def settle(
             continue
         rate_in, rate_out = rate_for(model)
         listing = "\n".join(f"- {pid}: {rows[pid]['summary']}" for pid in candidates if pid in rows)
-        # Same correction the headline estimate uses. Without it this ran ~3x
-        # light, so the cap let through a call it should have stopped on — and
-        # `usage.usd` before it is real money, which made the overrun look like
-        # the estimate had been right all along.
-        next_call = (estimate_tokens(listing + scene["text"] + SETTLE_SYSTEM)
-                     / 1e6 * rate_in * _ESTIMATE_SLACK
-                     + _OUTPUT_TOKENS_PER_CALL / 1e6 * rate_out)
+        # Priced from this call's own listing size rather than a corpus
+        # average. The cap guards the next call, so the density that matters is
+        # this one's — a late scene in book five carries ten times the
+        # candidates of an early one in book one, and `usage.usd` before it is
+        # real money already spent.
+        tok_in, tok_out = billed_tokens_per_call(len(candidates))
+        next_call = tok_in / 1e6 * rate_in + tok_out / 1e6 * rate_out
         projected = usage.usd + next_call
         if projected > max_usd:
             report.stopped = (f"spend cap ${max_usd:,.2f} would be exceeded "
@@ -666,8 +708,12 @@ def settle_batch(
     est_in = sum(estimate_tokens(r["params"]["messages"][0]["content"])
                  for r in requests) + len(requests) * estimate_tokens(SETTLE_SYSTEM)
     report.estimated_input_tokens = est_in
-    estimate = BATCH_DISCOUNT * (est_in / 1e6 * rate_in * _ESTIMATE_SLACK
-                                 + len(requests) * _OUTPUT_TOKENS_PER_CALL / 1e6 * rate_out)
+    # Summed call by call at each one's real listing size, because output is
+    # sub-linear in it: pricing the batch at its mean density is cheaper than
+    # the batch actually is, and a batch cannot be stopped once submitted.
+    estimate = BATCH_DISCOUNT * sum(
+        t_in / 1e6 * rate_in + t_out / 1e6 * rate_out
+        for t_in, t_out in (billed_tokens_per_call(len(c)) for _s, c in prompts.values()))
     progress(f"  {len(requests)} scenes · estimated ${estimate:,.2f} batched")
     if estimate > max_usd:
         report.stopped = (f"estimated ${estimate:,.2f} exceeds the ${max_usd:,.2f} cap; "

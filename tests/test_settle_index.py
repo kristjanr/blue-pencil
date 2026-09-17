@@ -333,38 +333,102 @@ def test_excluding_closed_promises_shrinks_every_later_listing(world):
 
 
 # --------------------------------------------------------------- cost estimate
+#: The two books that have actually been billed, which is what the cost model
+#: is fitted to: (candidates/scene as run, calls, billed input, billed output,
+#: invoice at sonnet-5's $2/$10).
+BILLED = {
+    1: (51, 162, 976_483, 180_308, 3.76),
+    2: (183, 166, 2_420_889, 367_559, 8.52),
+}
+
+
 def test_output_tokens_are_priced_at_the_output_rate():
     """The bug this exists for: output was folded into a single scalar on the
     input term, which hid the fact that it bills at five times input. Fold it
     back and this test fails."""
-    from bp.settle import IndexReport, _OUTPUT_TOKENS_PER_CALL
+    from bp.settle import IndexReport, billed_tokens_per_call
 
-    rep = IndexReport(scenes=100, prompt_tokens=1_000_000)
+    rep = IndexReport(scenes=100, pairs=100 * 51)
     in_only = rep.cost_usd(2.0, batch=False)
     with_out = rep.cost_usd(2.0, 10.0, batch=False)
 
     assert with_out > in_only
-    assert with_out - in_only == pytest.approx(100 * _OUTPUT_TOKENS_PER_CALL / 1e6 * 10.0)
+    assert with_out - in_only == pytest.approx(
+        100 * billed_tokens_per_call(51)[1] / 1e6 * 10.0)
 
 
-def test_the_estimate_reproduces_the_one_run_that_was_actually_billed():
-    """Book one, instrumented: 780,270 predicted input tokens, 976,483 billed,
-    180,308 output over 162 calls on sonnet, invoice $3.76. The constants are
-    fitted to exactly this point, so if a later change moves the prediction off
-    it, the change either found a better model of the cost — and should re-fit —
-    or broke this one.
+@pytest.mark.parametrize("book", sorted(BILLED))
+def test_the_estimate_reproduces_the_runs_that_were_actually_billed(book):
+    """Two instrumented books, priced from candidate density against the bill.
 
-    The first version of this test pinned $4.71, from the run before output was
-    measured properly. Both the input slack and the output term were wrong then,
-    in opposite directions, which is how the total looked close enough to trust.
+    The first version of this pinned $4.71, from the run before output was
+    measured properly. The second pinned book one alone at $3.76 — and book two
+    then came in at $8.52 against a $5.64 prediction, because one book cannot
+    tell a constant from a slope.
     """
     from bp.settle import IndexReport
 
-    rep = IndexReport(scenes=159, prompt_tokens=780_270)
-    assert rep.cost_usd(2.0, 10.0, batch=False) == pytest.approx(3.76, abs=0.10)
-    # and the batch price is half of it, not half of some other arithmetic
+    density, calls, tok_in, tok_out, usd = BILLED[book]
+    rep = IndexReport(scenes=calls, pairs=calls * density)
+
+    assert rep.cost_usd(2.0, 10.0, batch=False) == pytest.approx(usd, abs=0.10)
+    # and it gets there through the right two terms, not a lucky total
+    assert rep.cost_usd(2.0, batch=False) == pytest.approx(tok_in / 1e6 * 2.0, rel=0.02)
     assert rep.cost_usd(2.0, 10.0, batch=True) == pytest.approx(
         rep.cost_usd(2.0, 10.0, batch=False) / 2)
+
+
+def test_a_denser_listing_costs_more_per_call():
+    """The whole reason for the refit: cost per call is not a constant.
+
+    Book one ran at 51 candidates per scene and book five will run near 574. A
+    model that prices both the same under-quotes the tail by roughly threefold.
+    """
+    from bp.settle import billed_tokens_per_call
+
+    light_in, light_out = billed_tokens_per_call(51)
+    heavy_in, heavy_out = billed_tokens_per_call(574)
+    assert heavy_in > light_in * 5
+    assert heavy_out > light_out * 3
+
+
+def test_output_grows_sub_linearly_in_the_listing():
+    """Input is linear in candidates; output is not, and conflating them is how
+    the tail gets over-quoted once the density term exists at all.
+
+    The model writes about the promises it closes, and closes do not scale with
+    the size of the list it was offered.
+    """
+    from bp.settle import billed_tokens_per_call
+
+    base_in, base_out = billed_tokens_per_call(100)
+    more_in, more_out = billed_tokens_per_call(400)
+    assert more_out < base_out * 4, "four times the listing is not four times the answer"
+    assert more_out > base_out, "but it is not flat either"
+    # input's listing term, by contrast, is exactly proportional
+    from bp.settle import _BILLED_IN_BASE
+    assert (more_in - _BILLED_IN_BASE) == pytest.approx((base_in - _BILLED_IN_BASE) * 4)
+
+
+def test_a_mixed_run_is_priced_per_book_not_at_the_average():
+    """Averaging density across books gives a different number, not the same one.
+
+    Output is concave in density, so a book at 49 candidates/scene plus one at
+    574 bills *less* output than twice the same call count at their mean — the
+    lumped figure over-quotes. Input is linear and unaffected. The direction is
+    the safe one; pricing per book is still what the by-book table reports, and
+    the two should not silently disagree.
+    """
+    from bp.settle import IndexReport
+
+    split = IndexReport(scenes=306, pairs=159 * 49 + 147 * 574,
+                        by_book={"book 1": (159, 159 * 49, 0),
+                                 "book 5": (147, 147 * 574, 0)})
+    lumped = IndexReport(scenes=split.scenes, pairs=split.pairs)
+
+    assert split.cost_usd(2.0, 10.0) < lumped.cost_usd(2.0, 10.0)
+    # the gap is output only — input is linear, so both price it identically
+    assert split.cost_usd(2.0) == pytest.approx(lumped.cost_usd(2.0))
 
 
 def test_a_run_records_the_tokens_that_would_let_the_next_estimate_be_better():
