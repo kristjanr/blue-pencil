@@ -194,6 +194,9 @@ def cmd_settle(args) -> int:
     _echo(f"database: {graph.path}")
     if args.what == "index":
         index, report = candidate_index(graph, profile)
+        # Price the table at the model this would really run on. It used to be
+        # hardcoded to sonnet, which is right only by coincidence.
+        report.model = args.model or ws.load_policy(args.run).model_for("judge")
         _echo(report.render())
         if args.show:
             _echo("")

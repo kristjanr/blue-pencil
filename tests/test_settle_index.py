@@ -7,6 +7,9 @@ merely miss it — combined with deriving scope from what survives the pass, it
 relabels that promise a series-level debt the continuation has to discharge.
 """
 
+import pytest
+from types import SimpleNamespace
+
 from bp.models import Citation, Entity, Promise
 from bp.settle import candidate_index
 
@@ -327,3 +330,53 @@ def test_excluding_closed_promises_shrinks_every_later_listing(world):
     assert rep_part.prompt_tokens < rep_full.prompt_tokens
     assert all("P-0" not in pids for pids in part.values())
     assert any("P-2" in pids for pids in part.values()), "the rest are untouched"
+
+
+# --------------------------------------------------------------- cost estimate
+def test_output_tokens_are_priced_at_the_output_rate():
+    """The bug this exists for: output was folded into a single scalar on the
+    input term, which hid the fact that it bills at five times input. Fold it
+    back and this test fails."""
+    from bp.settle import IndexReport, _OUTPUT_TOKENS_PER_CALL
+
+    rep = IndexReport(scenes=100, prompt_tokens=1_000_000)
+    in_only = rep.cost_usd(2.0, batch=False)
+    with_out = rep.cost_usd(2.0, 10.0, batch=False)
+
+    assert with_out > in_only
+    assert with_out - in_only == pytest.approx(100 * _OUTPUT_TOKENS_PER_CALL / 1e6 * 10.0)
+
+
+def test_the_estimate_reproduces_the_one_run_that_was_actually_billed():
+    """Book one: 159 scenes, 780,270 predicted input tokens on sonnet, and a
+    real invoice of $4.71. The constants are fitted to exactly this point, so
+    if a later change moves the prediction off it, the change either found a
+    better model of the cost — and should re-fit — or broke this one."""
+    from bp.settle import IndexReport
+
+    rep = IndexReport(scenes=159, prompt_tokens=780_270)
+    assert rep.cost_usd(2.0, 10.0, batch=False) == pytest.approx(4.71, abs=0.05)
+    # and the batch price is half of it, not half of some other arithmetic
+    assert rep.cost_usd(2.0, 10.0, batch=True) == pytest.approx(
+        rep.cost_usd(2.0, 10.0, batch=False) / 2)
+
+
+def test_a_run_records_the_tokens_that_would_let_the_next_estimate_be_better():
+    """Book one's bill could not be decomposed because the run kept only the
+    dollar total — a product of six terms, which constrains none of them."""
+    from bp.llm import Usage
+    from bp.settle import SettleReport, _record_spend
+
+    usage = Usage()
+    usage.add("claude-sonnet-5", SimpleNamespace(
+        input_tokens=1000, output_tokens=100,
+        cache_read_input_tokens=0, cache_creation_input_tokens=0), stage="settle")
+
+    rep = SettleReport(estimated_input_tokens=500)
+    _record_spend(rep, usage, "claude-sonnet-5")
+    rep.usd = usage.usd
+
+    assert rep.as_dict()["spend"]["input_tokens"] == 1000
+    assert rep.as_dict()["spend"]["output_tokens"] == 100
+    assert rep.as_dict()["spend"]["estimated_input_tokens"] == 500
+    assert "2.00x" in rep.calibration(), "1000 billed against 500 predicted"

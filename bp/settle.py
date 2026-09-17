@@ -55,13 +55,29 @@ from .profile import SeriesProfile
 from .textstats import estimate_tokens
 
 
-#: `estimate_tokens` is a words-to-tokens approximation and it runs light on
-#: this shape of prompt — a long list of short, id-heavy lines. Measured
-#: against the pilot it under-reported by about 2.3x once output tokens were
-#: counted too. A spend cap checked against an estimate that optimistic is not
-#: a cap, and a report quoting the raw figure beside a cap that corrects it
-#: tells two stories. Re-measure this if the prompt shape changes.
-_ESTIMATE_SLACK = 2.3
+#: `estimate_tokens` is a chars-to-tokens approximation and it runs light on
+#: this shape of prompt — a long list of short, id-heavy lines, where the real
+#: tokenizer gets far less mileage per character than it does on prose.
+#:
+#: 2.3 was fitted against the pilot with output folded in, and book one then
+#: came in at $4.71 against its $3.58 prediction. Decomposing that bill:
+#: $0.17 of it was output (see `_OUTPUT_TOKENS_PER_CALL`, now priced on its
+#: own), leaving $4.54 of input against 780,270 predicted tokens at sonnet's
+#: $2/Mtok — an undercount of 2.91x on the input term alone.
+#:
+#: This number is an empirical fit, not an explanation: it says how far the
+#: estimate lands from the bill, not why. The why needs a run's real token
+#: counts next to its real prompts, which is what `SettleReport.calibration`
+#: now preserves and what book one did not. Re-fit it from that, and re-fit it
+#: whenever the prompt shape changes.
+_ESTIMATE_SLACK = 2.91
+
+#: Measured off book one's 210 emitted closes: a promise id, a verbatim quote,
+#: a sentence of reasoning and a confidence, ~105 tokens per call averaged over
+#: 159 calls. It is small — 3.5% of that run — but it bills at five times the
+#: input rate on every model in the table, and it grows with candidate density,
+#: so books four and five will carry more of it per call than book one did.
+_OUTPUT_TOKENS_PER_CALL = 105
 
 
 @dataclass
@@ -81,19 +97,33 @@ class IndexReport:
     #: one is wrong by a large factor, in the direction that gets a budget
     #: approved and then overrun.
     by_book: dict[str, tuple[int, int, int]] = field(default_factory=dict)
+    #: The judge model this pass would really use. Empty means "not told", and
+    #: the per-book table then says so rather than quietly pricing at sonnet.
+    model: str = ""
 
-    def cost_usd(self, rate_in: float, *, batch: bool = True) -> float:
+    def cost_usd(self, rate_in: float, rate_out: float | None = None,
+                 *, batch: bool = True, calls: int | None = None) -> float:
         """What a pass would actually cost, not what the token estimate says.
 
-        Carries the same measured correction the spend cap uses. Reporting the
-        raw estimate here while the cap applied the factor gave two different
-        figures for one number out of one tool — the kind of discrepancy that
-        gets a budget approved against the optimistic one.
+        Two terms, because the bill has two. Output was previously folded into
+        a single scalar on input, which hid it: output bills at five times
+        input on every model in the table, so a settling run that returns a
+        verbatim quote and a sentence of reasoning per close pays a rate the
+        estimate never named. Folding it into the input term also meant the
+        correction silently moved whenever the *shape* of the answer changed,
+        which is not something a cost model should do quietly.
+
+        `rate_out` is optional only so old callers keep working; pass it.
         """
+        calls = self.scenes if calls is None else calls
         usd = self.prompt_tokens / 1_000_000 * rate_in * _ESTIMATE_SLACK
+        if rate_out is not None:
+            usd += calls * _OUTPUT_TOKENS_PER_CALL / 1_000_000 * rate_out
         return usd * 0.5 if batch else usd
 
     def render(self) -> str:
+        from .llm import rate_for
+
         sizes = sorted(self.per_scene)
         med = statistics.median(sizes) if sizes else 0
         p90 = sizes[int(len(sizes) * 0.9)] if sizes else 0
@@ -103,18 +133,26 @@ class IndexReport:
             f"promises with no resolvable plant (every scene is 'after'): {self.unanchored:,}",
             f"promises owed to nobody resolvable (over-included, never dropped): {self.unowned:,}",
             "",
-            f"one pass = {self.scenes:,} calls · {self.prompt_tokens:,} estimated input tokens",
-            f"cost below carries the measured {_ESTIMATE_SLACK}x correction "
-            f"(the raw estimate ran that much light against the pilot):",
+            f"one pass = {self.scenes:,} calls · {self.prompt_tokens:,} estimated input tokens "
+            f"+ ~{self.scenes * _OUTPUT_TOKENS_PER_CALL:,} output",
+            f"input carries the measured {_ESTIMATE_SLACK}x correction; output is priced "
+            f"separately at its own rate. Both are fits against book one, not guarantees:",
         ]
-        for model, rate in (("claude-haiku-4-5", 1.0), ("claude-sonnet-5", 2.0), ("claude-opus-5", 5.0)):
-            lines.append(f"  {model:20} ${self.cost_usd(rate):>7,.2f} batched")
+        for model in ("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"):
+            r_in, r_out = rate_for(model)
+            lines.append(f"  {model:20} ${self.cost_usd(r_in, r_out):>7,.2f} batched  "
+                         f"${self.cost_usd(r_in, r_out, batch=False):>7,.2f} live")
         if self.by_book:
-            lines += ["", "per book (sonnet, batched) — promises accumulate, so these are not equal:"]
+            judge = self.model or "claude-sonnet-5"
+            r_in, r_out = rate_for(judge)
+            lines += ["", f"per book ({judge}, live) — promises accumulate, "
+                          "so these are not equal:"]
             for book, (n, pairs, tokens) in sorted(self.by_book.items()):
                 per = pairs / n if n else 0
+                usd = (tokens / 1e6 * r_in * _ESTIMATE_SLACK
+                       + n * _OUTPUT_TOKENS_PER_CALL / 1e6 * r_out)
                 lines.append(f"  {book:12} {n:4} scenes · {per:6.0f} candidates/scene · "
-                             f"${tokens / 1e6 * 2.0 * _ESTIMATE_SLACK * 0.5:>6,.2f}")
+                             f"${usd:>6,.2f}")
         return "\n".join(lines)
 
 
@@ -237,6 +275,16 @@ def candidate_index(graph: Graph, profile: SeriesProfile | None = None,
     return index, report
 
 
+def _record_spend(report: "SettleReport", usage: Usage, model: str) -> None:
+    """Copy the API's own usage record onto the report, so it outlives the run."""
+    report.model = model
+    report.calls = usage.calls
+    report.input_tokens = usage.input_tokens
+    report.output_tokens = usage.output_tokens
+    report.cache_read_tokens = usage.cache_read_tokens
+    report.cache_write_tokens = usage.cache_write_tokens
+
+
 # ------------------------------------------------------------------- stage two
 SETTLE_SYSTEM = """You decide which of a novel's open promises a given scene pays off.
 
@@ -290,6 +338,41 @@ class SettleReport:
     usd: float = 0.0
     stopped: str = ""
     errors: list[str] = field(default_factory=list)
+    #: What the run actually consumed, straight off the API's own usage
+    #: records. Book one cost $4.71 against an estimate of $3.58 and the gap
+    #: could not be explained, because the only number kept was the dollar
+    #: total — which is a product of six terms and so tells you nothing about
+    #: any of them. An estimator can only be corrected against the thing it
+    #: estimates, so a run that does not record its own tokens condemns the
+    #: next estimate to the same error.
+    model: str = ""
+    calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    #: What `candidate_index` predicted for exactly the scenes this run read,
+    #: so the comparison is like-for-like rather than against a whole-corpus
+    #: figure that included scenes the run skipped.
+    estimated_input_tokens: int = 0
+
+    def calibration(self) -> str:
+        """How far the estimate ran from the bill, term by term."""
+        from .llm import rate_for
+
+        if not self.calls or not self.estimated_input_tokens:
+            return ""
+        billed_in = self.input_tokens + self.cache_read_tokens + self.cache_write_tokens
+        ratio = billed_in / self.estimated_input_tokens
+        out_share = 0.0
+        if billed_in or self.output_tokens:
+            rate_in, rate_out = rate_for(self.model)
+            out_share = (self.output_tokens * rate_out) / max(
+                1e-9, billed_in * rate_in + self.output_tokens * rate_out)
+        return (f"estimate vs bill: {self.estimated_input_tokens:,} predicted input "
+                f"vs {billed_in:,} billed ({ratio:.2f}x) · "
+                f"{self.output_tokens:,} output tokens = {out_share:.0%} of spend · "
+                f"${self.usd / self.calls:.4f} per call")
 
     def as_dict(self) -> dict:
         """The whole result, not the first 25 of it.
@@ -302,6 +385,15 @@ class SettleReport:
             "scenes_read": self.scenes_read,
             "usd": round(self.usd, 4),
             "stopped": self.stopped,
+            "spend": {
+                "model": self.model,
+                "calls": self.calls,
+                "input_tokens": self.input_tokens,
+                "output_tokens": self.output_tokens,
+                "cache_read_tokens": self.cache_read_tokens,
+                "cache_write_tokens": self.cache_write_tokens,
+                "estimated_input_tokens": self.estimated_input_tokens,
+            },
             "closes": [{"scene": s, "promise_id": p, "why": w, "confidence": c}
                        for s, p, w, c in self.closes],
             "rejected_quote": [{"scene": s, "promise_id": p, "quote": q}
@@ -318,6 +410,8 @@ class SettleReport:
             f"closes rejected because the quote is not in the scene: {len(self.rejected_quote)}",
             f"closes naming a promise that was not a candidate: {len(self.rejected_unknown)}",
         ]
+        if (cal := self.calibration()):
+            lines.append(cal)
         # The rejected quote is the interesting one: a model that paraphrases
         # instead of copying looks identical to one that invents, and only the
         # text tells them apart.
@@ -408,9 +502,16 @@ def settle(
         candidates = [p for p in index.get(scene["scene_id"], []) if p not in closed]
         if not candidates:
             continue
-        rate_in, _ = rate_for(model)
+        rate_in, rate_out = rate_for(model)
         listing = "\n".join(f"- {pid}: {rows[pid]['summary']}" for pid in candidates if pid in rows)
-        projected = usage.usd + estimate_tokens(listing + scene["text"]) / 1e6 * rate_in
+        # Same correction the headline estimate uses. Without it this ran ~3x
+        # light, so the cap let through a call it should have stopped on — and
+        # `usage.usd` before it is real money, which made the overrun look like
+        # the estimate had been right all along.
+        next_call = (estimate_tokens(listing + scene["text"] + SETTLE_SYSTEM)
+                     / 1e6 * rate_in * _ESTIMATE_SLACK
+                     + _OUTPUT_TOKENS_PER_CALL / 1e6 * rate_out)
+        projected = usage.usd + next_call
         if projected > max_usd:
             report.stopped = (f"spend cap ${max_usd:,.2f} would be exceeded "
                               f"(${usage.usd:,.2f} spent, {report.scenes_read} scenes read)")
@@ -418,6 +519,9 @@ def settle(
 
         prompt = (f"--- SCENE {scene['scene_id']} ---\n{scene['text']}\n\n"
                   f"--- PROMISES PLANTED BEFORE THIS SCENE ---\n{listing}")
+        # Counted here rather than taken from the index, because this is the
+        # string that is actually sent — system prompt and schema included.
+        report.estimated_input_tokens += estimate_tokens(SETTLE_SYSTEM) + estimate_tokens(prompt)
         try:
             out = structured(client, model, _Settlement, system=SETTLE_SYSTEM, prompt=prompt,
                              max_tokens=4_000, usage=usage, stage="settle")
@@ -447,6 +551,7 @@ def settle(
                  f"{len(out.closes)} proposed, ${usage.usd:,.2f} so far")
 
     report.usd = usage.usd
+    _record_spend(report, usage, model)
     if apply:
         graph.conn.commit()
     return report
@@ -507,9 +612,17 @@ def settle_batch(
     if len(prompts) != len(requests):
         raise ValueError("two scene ids collide as one batch custom_id")
 
-    rate_in, _rate_out = rate_for(model)
-    estimate = (sum(estimate_tokens(r["params"]["messages"][0]["content"])
-                    for r in requests) / 1e6 * rate_in * BATCH_DISCOUNT) * _ESTIMATE_SLACK
+    rate_in, rate_out = rate_for(model)
+    # Every term the bill has: the prompt, the system block that rides along
+    # with each request, and the answer. The system block was missing here and
+    # the answer was missing everywhere — and this is the estimate that decides
+    # whether to submit something that cannot afterwards be stopped, so an
+    # optimistic one is not a cap but a rubber stamp.
+    est_in = sum(estimate_tokens(r["params"]["messages"][0]["content"])
+                 for r in requests) + len(requests) * estimate_tokens(SETTLE_SYSTEM)
+    report.estimated_input_tokens = est_in
+    estimate = BATCH_DISCOUNT * (est_in / 1e6 * rate_in * _ESTIMATE_SLACK
+                                 + len(requests) * _OUTPUT_TOKENS_PER_CALL / 1e6 * rate_out)
     progress(f"  {len(requests)} scenes · estimated ${estimate:,.2f} batched")
     if estimate > max_usd:
         report.stopped = (f"estimated ${estimate:,.2f} exceeds the ${max_usd:,.2f} cap; "
@@ -557,6 +670,7 @@ def settle_batch(
                 _close(graph, c.promise_id, scene["scene_id"], run_id, c.confidence)
 
     report.usd = usage.usd
+    _record_spend(report, usage, model)
     if apply:
         graph.conn.commit()
     return report
