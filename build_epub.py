@@ -14,7 +14,9 @@ Layout and CSS mirror the v5 EPUB.
 FRONTMATTER_DIR (default: frontmatter/ next to this script) holds ready-made
 XHTML pages copied verbatim between the cover and chapter one, in filename
 order; each page's <title> becomes its table-of-contents entry. Without it, a
-title page is generated from the Markdown instead.
+title page is generated from the Markdown instead. A printed Table of Contents
+follows the front matter, and pages in backmatter/ (next to FRONTMATTER_DIR)
+come after the last chapter.
 """
 import html
 import os
@@ -60,6 +62,13 @@ body.frontmatter ol { list-style: none; padding: 0; }
 body.frontmatter ul { list-style: none; margin: 0 0 0 2.2em; padding: 0; text-align: left; }
 body.frontmatter li { margin: 0.1em 0; }
 body.frontmatter blockquote { margin: 2em 8%; font-style: italic; text-align: center; }
+body.frontmatter p.contact { line-height: 1.6; }
+
+body.contents p { text-indent: 0; margin: 0 0 0.35em; }
+body.contents p.backmatter { margin-top: 1.4em; }
+body.contents a { text-decoration: none; }
+
+body.chapter p.contact { text-indent: 0; text-align: left; margin-top: 1.2em; line-height: 1.6; }
 
 body.titlepage { text-align: center; }
 body.titlepage h1 { font-size: 2.3em; margin-top: 22%; letter-spacing: 0.02em; }
@@ -131,6 +140,19 @@ def chapter_body(heading, blocks):
     return "\n".join(out)
 
 
+def load_pages(directory):
+    """Yield (href, id, toc label, content) for each XHTML page in directory, by filename."""
+    if not os.path.isdir(directory):
+        return
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".xhtml"):
+            continue
+        with open(os.path.join(directory, name), encoding="utf-8") as f:
+            content = f.read()
+        label = html.unescape(re.search(r"<title>(.*?)</title>", content).group(1))
+        yield name, name[:-len(".xhtml")], label, content
+
+
 def build(src, cover, dest, frontmatter=None):
     with open(src, encoding="utf-8") as f:
         title, subtitle, chapters = parse(f.read())
@@ -141,29 +163,37 @@ def build(src, cover, dest, frontmatter=None):
     files["cover.xhtml"] = ("cover-page", page("Cover", "cover",
                             '<img src="cover.jpg" alt="Cover"/>', "cover"))
     toc = []
-    if os.path.isdir(frontmatter):
-        for name in sorted(os.listdir(frontmatter)):
-            if not name.endswith(".xhtml"):
-                continue
-            with open(os.path.join(frontmatter, name), encoding="utf-8") as f:
-                content = f.read()
-            label = html.unescape(re.search(r"<title>(.*?)</title>", content).group(1))
-            files[name] = (name[:-len(".xhtml")], content)
-            toc.append((name, label))
-    else:
+    for href, id_, label, content in load_pages(frontmatter):
+        files[href] = (id_, content)
+        toc.append((href, label))
+    if not toc:
         files["title.xhtml"] = ("titlepage", page(title, "titlepage",
                                 f"<h1>{inline(title)}</h1>\n<h3>{AUTHOR}</h3>"))
         toc.append(("title.xhtml", title))
+
+    # The printed contents page lists what follows it: chapters, then back matter.
+    files["contents.xhtml"] = None  # placeholder keeps its spine position
+    toc.append(("contents.xhtml", "Table of Contents"))
+    listed = []
     for n, (heading, blocks) in enumerate(chapters, 1):
         href = f"ch{n:02d}.xhtml"
         files[href] = (f"ch{n:02d}", page(heading, "chapter", chapter_body(heading, blocks)))
-        toc.append((href, heading))
+        listed.append((href, heading, ""))
+    backmatter = os.path.join(os.path.dirname(os.path.abspath(frontmatter)), "backmatter")
+    for i, (href, id_, label, content) in enumerate(load_pages(backmatter)):
+        files[href] = (id_, content)
+        listed.append((href, label, ' class="backmatter"' if i == 0 else ""))
+    files["contents.xhtml"] = ("contents", page("Table of Contents", "contents",
+        "<h2>Table of Contents</h2>\n" + "\n".join(
+            f'<p{cls}><a href="{h}">{html.escape(t)}</a></p>' for h, t, cls in listed)))
+    toc += [(h, t) for h, t, _ in listed]
 
     nav_items = "\n".join(f'<li><a href="{h}">{html.escape(t)}</a></li>' for h, t in toc)
     nav = page("Contents", "frontmatter",
                f'<nav epub:type="toc" id="toc"><h1>Contents</h1><ol>\n{nav_items}\n</ol></nav>\n'
                '<nav epub:type="landmarks" hidden=""><ol>\n'
                '<li><a epub:type="cover" href="cover.xhtml">Cover</a></li>\n'
+               '<li><a epub:type="toc" href="contents.xhtml">Table of Contents</a></li>\n'
                '<li><a epub:type="bodymatter" href="ch01.xhtml">Start</a></li>\n</ol></nav>')
 
     book_id = f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, title + ' v6')}"
@@ -223,7 +253,7 @@ def build(src, cover, dest, frontmatter=None):
         z.write(cover, "OEBPS/cover.jpg", zipfile.ZIP_STORED)
         for href, (_, content) in files.items():
             z.writestr(f"OEBPS/{href}", content, zipfile.ZIP_DEFLATED)
-    print(f"{dest}: {len(toc) - len(chapters)} front-matter pages, {len(chapters)} chapters")
+    print(f"{dest}: {len(files)} pages, {len(chapters)} chapters")
 
 
 if __name__ == "__main__":
