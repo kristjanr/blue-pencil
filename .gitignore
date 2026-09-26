@@ -13,3 +13,5 @@ eval/runs/**
 bp-run
 audit.html
 graph/backups/
+*.epub
+epub_counter/text/
