@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build an EPUB 3 from the edited Markdown transcript.
 
-Usage: build_epub.py SOURCE.md COVER.jpg OUTPUT.epub
+Usage: build_epub.py SOURCE.md COVER.jpg OUTPUT.epub [FRONTMATTER_DIR]
 
 The Markdown dialect is the small one the transcript uses:
   # Title            book title (the italic line under it is the subtitle)
@@ -10,8 +10,14 @@ The Markdown dialect is the small one the transcript uses:
   * * *              scene break
   *x* / **x**        italic / bold
 Layout and CSS mirror the v5 EPUB.
+
+FRONTMATTER_DIR (default: frontmatter/ next to this script) holds ready-made
+XHTML pages copied verbatim between the cover and chapter one, in filename
+order; each page's <title> becomes its table-of-contents entry. Without it, a
+title page is generated from the Markdown instead.
 """
 import html
+import os
 import re
 import sys
 import uuid
@@ -31,8 +37,10 @@ h1 { text-align: center; font-variant: small-caps; font-size: 2em; margin: 2em 0
 h2 { text-align: center; font-variant: small-caps; font-size: 1.6em; line-height: 1.25;
      margin: 2.2em 0 1.6em; }
 h3 { text-align: center; font-style: italic; font-size: 1.1em; margin: 0.4em 0; }
+h4 { text-align: left; text-decoration: underline; font-size: 1.05em; margin: 1.3em 0 0.2em; }
 
 p { margin: 0; }
+hr { border: 0; border-top: 1px solid #999; width: 30%; margin: 2em auto; }
 
 /* ---- chapters: retail-ebook body typography ---- */
 body.chapter p { text-align: justify; text-indent: 1.3em; }
@@ -49,6 +57,9 @@ body.chapter p.break { text-align: center; margin: 2.4em 0;
 /* ---- front matter ---- */
 body.frontmatter p { text-align: center; text-indent: 0; margin: 0 0 0.9em; }
 body.frontmatter ol { list-style: none; padding: 0; }
+body.frontmatter ul { list-style: none; margin: 0 0 0 2.2em; padding: 0; text-align: left; }
+body.frontmatter li { margin: 0.1em 0; }
+body.frontmatter blockquote { margin: 2em 8%; font-style: italic; text-align: center; }
 
 body.titlepage { text-align: center; }
 body.titlepage h1 { font-size: 2.3em; margin-top: 22%; letter-spacing: 0.02em; }
@@ -120,16 +131,29 @@ def chapter_body(heading, blocks):
     return "\n".join(out)
 
 
-def build(src, cover, dest):
+def build(src, cover, dest, frontmatter=None):
     with open(src, encoding="utf-8") as f:
         title, subtitle, chapters = parse(f.read())
+    if frontmatter is None:
+        frontmatter = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontmatter")
 
-    files = {}  # href -> (id, content, spine?)
+    files = {}  # href -> (id, content)
     files["cover.xhtml"] = ("cover-page", page("Cover", "cover",
                             '<img src="cover.jpg" alt="Cover"/>', "cover"))
-    files["title.xhtml"] = ("titlepage", page(title, "titlepage",
-                            f"<h1>{inline(title)}</h1>\n<h3>{AUTHOR}</h3>"))
-    toc = [("title.xhtml", title)]
+    toc = []
+    if os.path.isdir(frontmatter):
+        for name in sorted(os.listdir(frontmatter)):
+            if not name.endswith(".xhtml"):
+                continue
+            with open(os.path.join(frontmatter, name), encoding="utf-8") as f:
+                content = f.read()
+            label = html.unescape(re.search(r"<title>(.*?)</title>", content).group(1))
+            files[name] = (name[:-len(".xhtml")], content)
+            toc.append((name, label))
+    else:
+        files["title.xhtml"] = ("titlepage", page(title, "titlepage",
+                                f"<h1>{inline(title)}</h1>\n<h3>{AUTHOR}</h3>"))
+        toc.append(("title.xhtml", title))
     for n, (heading, blocks) in enumerate(chapters, 1):
         href = f"ch{n:02d}.xhtml"
         files[href] = (f"ch{n:02d}", page(heading, "chapter", chapter_body(heading, blocks)))
@@ -199,10 +223,10 @@ def build(src, cover, dest):
         z.write(cover, "OEBPS/cover.jpg", zipfile.ZIP_STORED)
         for href, (_, content) in files.items():
             z.writestr(f"OEBPS/{href}", content, zipfile.ZIP_DEFLATED)
-    print(f"{dest}: {len(chapters)} chapters")
+    print(f"{dest}: {len(toc) - len(chapters)} front-matter pages, {len(chapters)} chapters")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
+    if len(sys.argv) not in (4, 5):
         sys.exit(__doc__)
     build(*sys.argv[1:])
