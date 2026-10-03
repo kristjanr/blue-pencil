@@ -1,35 +1,38 @@
 #!/usr/bin/env python3
-"""Build an EPUB 3 from the edited Markdown transcript.
+"""Build an EPUB 3 from a Markdown manuscript.
 
-Usage: build_epub.py SOURCE.md COVER.jpg OUTPUT.epub [FRONTMATTER_DIR]
+Usage: build_epub.py BOOK_DIR SOURCE.md COVER.jpg OUTPUT.epub
 
-The Markdown dialect is the small one the transcript uses:
-  # Title            book title (the italic line under it is the subtitle)
+BOOK_DIR holds what is specific to one book:
+  book.json        title, author, series, series_position, identifier, description
+                   (author is optional; title defaults to the Markdown's # heading)
+  frontmatter/     optional ready-made XHTML pages, copied verbatim between the
+                   cover and the Table of Contents in filename order; each page's
+                   <title> becomes its navigation entry
+  backmatter/      optional pages placed after the last chapter, same rules
+
+Without frontmatter/, the opening pages are generated from the Markdown
+preamble (everything before the first "## Chapter"):
+  # Title / ## Subtitle   title page
+  *italic paragraphs*     "About This Book" page
+  > quote                 epigraph page; the line after a bare ">" is the attribution
+  ## Contents + list      entries reused as the printed Table of Contents text
+
+The chapter dialect:
   ## Chapter ...     one XHTML file per chapter
-  *line*␠␠           consecutive italic lines right after a heading = bylines
+  *line*             italic lines/paragraphs right after a heading = bylines
   * * *              scene break
+  ---                chapter separator (ignored)
   *x* / **x**        italic / bold
-Layout and CSS mirror the v5 EPUB.
-
-FRONTMATTER_DIR (default: frontmatter/ next to this script) holds ready-made
-XHTML pages copied verbatim between the cover and chapter one, in filename
-order; each page's <title> becomes its table-of-contents entry. Without it, a
-title page is generated from the Markdown instead. A printed Table of Contents
-follows the front matter, and pages in backmatter/ (next to FRONTMATTER_DIR)
-come after the last chapter.
+Layout and CSS mirror the v5 Infinite Extent EPUB.
 """
 import html
+import json
 import os
 import re
 import sys
-import uuid
 import zipfile
 from datetime import datetime, timezone
-
-AUTHOR = "Dennis E. Taylor"
-SERIES, SERIES_POS = "Bobiverse", 6
-DESCRIPTION = ("Personal, non-commercial transcript produced by the owner from the "
-               "Audible narration, for private reading only. Edited; not the publisher's text.")
 
 CSS = """@charset "utf-8";
 body { font-family: Georgia, "Iowan Old Style", serif; line-height: 1.4; margin: 0 6%; }
@@ -55,6 +58,7 @@ body.chapter p.opener::first-letter {
 }
 body.chapter p.break { text-align: center; margin: 2.4em 0;
                        letter-spacing: 1.1em; text-indent: 1.1em; font-size: 0.9em; }
+body.chapter p.contact { text-indent: 0; text-align: left; margin-top: 1.2em; line-height: 1.6; }
 
 /* ---- front matter ---- */
 body.frontmatter p { text-align: center; text-indent: 0; margin: 0 0 0.9em; }
@@ -63,12 +67,16 @@ body.frontmatter ul { list-style: none; margin: 0 0 0 2.2em; padding: 0; text-al
 body.frontmatter li { margin: 0.1em 0; }
 body.frontmatter blockquote { margin: 2em 8%; font-style: italic; text-align: center; }
 body.frontmatter p.contact { line-height: 1.6; }
+body.frontmatter p.about { font-style: italic; }
+body.frontmatter p.about:first-child { margin-top: 30%; }
+body.frontmatter blockquote.poem { margin-top: 30%; text-align: left; }
+body.frontmatter blockquote.poem p { text-align: left; margin: 0; }
+body.frontmatter blockquote.poem p.attribution { text-align: right; font-style: normal;
+                                                  margin-top: 1.2em; }
 
 body.contents p { text-indent: 0; margin: 0 0 0.35em; }
 body.contents p.backmatter { margin-top: 1.4em; }
 body.contents a { text-decoration: none; }
-
-body.chapter p.contact { text-indent: 0; text-align: left; margin-top: 1.2em; line-height: 1.6; }
 
 body.titlepage { text-align: center; }
 body.titlepage h1 { font-size: 2.3em; margin-top: 22%; letter-spacing: 0.02em; }
@@ -80,9 +88,12 @@ body.cover { margin: 0; text-align: center; }
 body.cover img { max-width: 100%; max-height: 100vh; }
 """
 
+COVER_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+
 BOLD = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
 # The (?<![\w*]) guard keeps "Sagittarius A*" from opening an italic span.
 ITALIC = re.compile(r"(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])")
+ITALIC_LINE = re.compile(r"\*[^*]+\*")
 
 
 def inline(text):
@@ -102,20 +113,41 @@ def page(title, body_class, body, epub_type=None):
 
 
 def parse(md):
-    """Return (title, subtitle, [(heading, [blocks])]) where blocks are paragraph strings."""
-    blocks = re.split(r"\n\s*\n", md.strip())
-    title = subtitle = None
-    chapters = []
+    """Return (preamble blocks, [(heading, [blocks])]); blocks are paragraph strings."""
+    preamble, chapters = [], []
+    for block in re.split(r"\n\s*\n", md.strip()):
+        block = block.strip("\n")
+        if block.strip() == "---":
+            continue
+        if block.startswith("## Chapter "):
+            chapters.append((block[3:].strip(), []))
+        elif chapters:
+            chapters[-1][1].append(block)
+        else:
+            preamble.append(block)
+    return preamble, chapters
+
+
+def parse_preamble(blocks):
+    """Split the preamble into title, subtitles, about paragraphs, epigraph, contents entries."""
+    pre = {"title": None, "subtitles": [], "about": [], "epigraph": None, "contents": []}
+    in_contents = False
     for block in blocks:
         if block.startswith("# "):
-            title = block[2:].strip()
+            pre["title"] = block[2:].strip()
         elif block.startswith("## "):
-            chapters.append((block[3:].strip(), []))
-        elif not chapters:
-            subtitle = block.strip().strip("*")
+            in_contents = block[3:].strip().lower() == "contents"
+            if not in_contents:
+                pre["subtitles"].append(block[3:].strip())
+        elif in_contents and block.lstrip().startswith("- "):
+            pre["contents"] += [l.strip()[2:] for l in block.split("\n") if l.strip()]
+        elif block.startswith(">"):
+            lines = [re.sub(r"^>\s?", "", l).rstrip() for l in block.split("\n")]
+            split = lines.index("") if "" in lines else len(lines)
+            pre["epigraph"] = (lines[:split], [l for l in lines[split + 1:] if l])
         else:
-            chapters[-1][1].append(block)
-    return title, subtitle, chapters
+            pre["about"].append(" ".join(block.split("\n")))
+    return pre
 
 
 def chapter_body(heading, blocks):
@@ -124,16 +156,17 @@ def chapter_body(heading, blocks):
     out = [f"<h2>{head}</h2>"]
     first = True
     after_break = False
-    for i, block in enumerate(blocks):
-        lines = [l.rstrip() for l in block.split("\n")]
+    for block in blocks:
+        lines = [l.strip() for l in block.split("\n")]
         if block.strip() == "* * *":
             out.append('<p class="break">⚜ ⚜ ⚜</p>')
             after_break = True
             continue
-        if i == 0 and all(re.fullmatch(r"\*[^*]+\*", l) for l in lines):
+        # Bylines (POV, date, place) open each chapter, before any prose.
+        if first and not after_break and all(ITALIC_LINE.fullmatch(l) for l in lines):
             out += [f'<p class="byline">{inline(l[1:-1])}</p>' for l in lines]
             continue
-        text = inline(" ".join(l.strip() for l in lines))
+        text = inline(" ".join(lines))
         cls = ' class="opener"' if first else ' class="noindent"' if after_break else ""
         out.append(f"<p{cls}>{text}</p>")
         first = after_break = False
@@ -153,40 +186,68 @@ def load_pages(directory):
         yield name, name[:-len(".xhtml")], label, content
 
 
-def build(src, cover, dest, frontmatter=None):
-    with open(src, encoding="utf-8") as f:
-        title, subtitle, chapters = parse(f.read())
-    if frontmatter is None:
-        frontmatter = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontmatter")
+def generated_frontmatter(pre, title, author):
+    """Yield (href, id, toc label, content) for pages built from the Markdown preamble."""
+    lines = [f"<h1>{html.escape(title)}</h1>"]
+    lines += [f"<h3>{inline(s)}</h3>" for s in pre["subtitles"]]
+    if author:
+        lines.append(f"<h3>{html.escape(author)}</h3>")
+    yield "title.xhtml", "titlepage", title, page(title, "titlepage", "\n".join(lines))
+    if pre["about"]:
+        body = "\n".join(f'<p class="about">{inline(p.strip())}</p>' for p in pre["about"])
+        yield ("about.xhtml", "about", "About This Book",
+               page("About This Book", "frontmatter", body))
+    if pre["epigraph"]:
+        verse, attribution = pre["epigraph"]
+        body = "".join(f"<p>{inline(l)}</p>" for l in verse)
+        body += "".join(f'<p class="attribution">{inline(l)}</p>' for l in attribution)
+        yield ("epigraph.xhtml", "epigraph", "Epigraph",
+               page("Epigraph", "frontmatter", f'<blockquote class="poem">{body}</blockquote>',
+                    "epigraph"))
 
-    files = {}  # href -> (id, content)
+
+def build(book_dir, src, cover, dest):
+    with open(os.path.join(book_dir, "book.json"), encoding="utf-8") as f:
+        meta = json.load(f)
+    with open(src, encoding="utf-8") as f:
+        preamble, chapters = parse(f.read())
+    pre = parse_preamble(preamble)
+    title = meta.get("title") or pre["title"]
+    author = meta.get("author")
+    cover_ext = os.path.splitext(cover)[1].lower()
+    if cover_ext not in COVER_TYPES:
+        sys.exit(f"cover must be JPEG or PNG, got {cover_ext}")
+    cover_href = "cover" + cover_ext
+
+    files = {}  # href -> (id, content), in spine order
     files["cover.xhtml"] = ("cover-page", page("Cover", "cover",
-                            '<img src="cover.jpg" alt="Cover"/>', "cover"))
+                            f'<img src="{cover_href}" alt="Cover"/>', "cover"))
     toc = []
-    for href, id_, label, content in load_pages(frontmatter):
+    front = list(load_pages(os.path.join(book_dir, "frontmatter")))
+    if not front:
+        front = list(generated_frontmatter(pre, title, author))
+    for href, id_, label, content in front:
         files[href] = (id_, content)
         toc.append((href, label))
-    if not toc:
-        files["title.xhtml"] = ("titlepage", page(title, "titlepage",
-                                f"<h1>{inline(title)}</h1>\n<h3>{AUTHOR}</h3>"))
-        toc.append(("title.xhtml", title))
 
     # The printed contents page lists what follows it: chapters, then back matter.
+    # A Contents list in the Markdown supplies richer entry text when it matches.
     files["contents.xhtml"] = None  # placeholder keeps its spine position
     toc.append(("contents.xhtml", "Table of Contents"))
+    entries = pre["contents"] if len(pre["contents"]) == len(chapters) else None
     listed = []
     for n, (heading, blocks) in enumerate(chapters, 1):
         href = f"ch{n:02d}.xhtml"
         files[href] = (f"ch{n:02d}", page(heading, "chapter", chapter_body(heading, blocks)))
-        listed.append((href, heading, ""))
-    backmatter = os.path.join(os.path.dirname(os.path.abspath(frontmatter)), "backmatter")
-    for i, (href, id_, label, content) in enumerate(load_pages(backmatter)):
+        listed.append((href, heading, inline(entries[n - 1] if entries else heading), ""))
+    for i, (href, id_, label, content) in enumerate(
+            load_pages(os.path.join(book_dir, "backmatter"))):
         files[href] = (id_, content)
-        listed.append((href, label, ' class="backmatter"' if i == 0 else ""))
+        listed.append((href, label, html.escape(label), ' class="backmatter"' if i == 0 else ""))
     files["contents.xhtml"] = ("contents", page("Table of Contents", "contents",
         "<h2>Table of Contents</h2>\n" + "\n".join(
-            f'<p{cls}><a href="{h}">{html.escape(t)}</a></p>' for h, t, cls in listed)))
-    toc += [(h, t) for h, t, _ in listed]
+            f'<p{cls}><a href="{h}">{text}</a></p>' for h, _, text, cls in listed)))
+    toc += [(h, label) for h, label, _, _ in listed]
 
     nav_items = "\n".join(f'<li><a href="{h}">{html.escape(t)}</a></li>' for h, t in toc)
     nav = page("Contents", "frontmatter",
@@ -196,7 +257,7 @@ def build(src, cover, dest, frontmatter=None):
                '<li><a epub:type="toc" href="contents.xhtml">Table of Contents</a></li>\n'
                '<li><a epub:type="bodymatter" href="ch01.xhtml">Start</a></li>\n</ol></nav>')
 
-    book_id = f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, title + ' v6')}"
+    book_id = meta["identifier"]
     navpoints = "\n".join(
         f'<navPoint id="np{i}" playOrder="{i}"><navLabel><text>{html.escape(t)}</text></navLabel>'
         f'<content src="{h}"/></navPoint>' for i, (h, t) in enumerate(toc, 1))
@@ -206,6 +267,18 @@ def build(src, cover, dest, frontmatter=None):
            f'<docTitle><text>{html.escape(title)}</text></docTitle>\n'
            f'<navMap>\n{navpoints}\n</navMap>\n</ncx>\n')
 
+    optional = ""
+    if author:
+        optional += f"\n    <dc:creator>{html.escape(author)}</dc:creator>"
+    if meta.get("description"):
+        optional += f"\n    <dc:description>{html.escape(meta['description'])}</dc:description>"
+    if meta.get("series"):
+        optional += (f'\n    <meta property="belongs-to-collection" id="series">'
+                     f'{html.escape(meta["series"])}</meta>'
+                     '\n    <meta refines="#series" property="collection-type">series</meta>')
+        if meta.get("series_position"):
+            optional += (f'\n    <meta refines="#series" property="group-position">'
+                         f'{meta["series_position"]}</meta>')
     modified = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     manifest = "\n".join(
         f'    <item id="{i}" href="{h}" media-type="application/xhtml+xml"/>'
@@ -215,13 +288,8 @@ def build(src, cover, dest, frontmatter=None):
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="bookid">{book_id}</dc:identifier>
-    <dc:title>{html.escape(title)}</dc:title>
-    <dc:creator>{AUTHOR}</dc:creator>
-    <dc:description>{html.escape(DESCRIPTION)}</dc:description>
+    <dc:title>{html.escape(title)}</dc:title>{optional}
     <dc:language>en</dc:language>
-    <meta property="belongs-to-collection" id="series">{SERIES}</meta>
-    <meta refines="#series" property="collection-type">series</meta>
-    <meta refines="#series" property="group-position">{SERIES_POS}</meta>
     <meta name="cover" content="cover-image"/>
     <meta property="dcterms:modified">{modified}</meta>
   </metadata>
@@ -229,7 +297,7 @@ def build(src, cover, dest, frontmatter=None):
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
     <item id="css" href="style.css" media-type="text/css"/>
-    <item id="cover-image" href="cover.jpg" media-type="image/jpeg" properties="cover-image"/>
+    <item id="cover-image" href="{cover_href}" media-type="{COVER_TYPES[cover_ext]}" properties="cover-image"/>
 {manifest}
   </manifest>
   <spine toc="ncx">
@@ -250,13 +318,13 @@ def build(src, cover, dest, frontmatter=None):
         z.writestr("OEBPS/nav.xhtml", nav, zipfile.ZIP_DEFLATED)
         z.writestr("OEBPS/toc.ncx", ncx, zipfile.ZIP_DEFLATED)
         z.writestr("OEBPS/style.css", CSS, zipfile.ZIP_DEFLATED)
-        z.write(cover, "OEBPS/cover.jpg", zipfile.ZIP_STORED)
+        z.write(cover, f"OEBPS/{cover_href}", zipfile.ZIP_STORED)
         for href, (_, content) in files.items():
             z.writestr(f"OEBPS/{href}", content, zipfile.ZIP_DEFLATED)
     print(f"{dest}: {len(files)} pages, {len(chapters)} chapters")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) not in (4, 5):
+    if len(sys.argv) != 5:
         sys.exit(__doc__)
     build(*sys.argv[1:])
